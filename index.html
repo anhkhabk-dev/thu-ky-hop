@@ -186,7 +186,7 @@ function readCfgUI() {
 $('#btnSaveCfg').onclick = () => { readCfgUI(); LS.set('tkh_cfg', cfg) ? toast('Đã lưu cài đặt') : toast('Không lưu được (trình duyệt chặn bộ nhớ)', true); loadCfgUI(); };
 $('#btnTestGemini').onclick = async () => {
   readCfgUI(); toast('Đang kiểm tra Gemini...');
-  try { const r = await gemini([{ text: 'Trả lời đúng một từ: OK' }], { retries: 0 }); toast('Gemini hoạt động: ' + r.text.trim().slice(0, 30)); }
+  try { const r = await gemini([{ text: 'Trả lời đúng một từ: OK' }], { retries: 0, timeoutSec: 30 }); toast('Gemini hoạt động: ' + r.text.trim().slice(0, 30)); }
   catch (e) { toast('Lỗi Gemini: ' + e.message, true, 8000); }
 };
 $('#btnTestDocs').onclick = async () => {
@@ -215,30 +215,41 @@ async function apiError(res) {
   if (res.status === 429) msg = 'Vượt giới hạn/hạn mức của Gemini, thử lại sau ít phút. ' + msg;
   const e = new Error(`[${res.status}] ${msg}`); e.status = res.status; return e;
 }
-async function gemini(parts, { schema = null, temperature = 0.2, retries = 3 } = {}) {
+async function gemini(parts, { schema = null, temperature = 0.2, retries = 3, timeoutSec = 300, signal = null, onWait = null } = {}) {
   if (!cfg.apiKey) throw new Error('Chưa nhập Gemini API key (tab Cài đặt).');
   const body = { contents: [{ role: 'user', parts }], generationConfig: { temperature } };
   if (schema) { body.generationConfig.responseMimeType = 'application/json'; body.generationConfig.responseSchema = schema; }
+  const wait = async (sec, why) => { for (let i = sec; i > 0; i--) { if (signal?.aborted) throw abortErr(); onWait?.(`${why} – thử lại sau ${i} giây`); await sleep(1000); } };
   for (let a = 0; ; a++) {
+    if (signal?.aborted) throw abortErr();
+    const ctl = new AbortController(); let timedOut = false;
+    const tm = setTimeout(() => { timedOut = true; ctl.abort(); }, timeoutSec * 1000);
+    const onAbort = () => ctl.abort(); signal?.addEventListener('abort', onAbort);
     let res;
     try {
       res = await fetch(`${API}/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey }, body: JSON.stringify(body)
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey }, body: JSON.stringify(body), signal: ctl.signal
       });
+      if (res.ok) {
+        const j = await res.json();
+        const c = j.candidates?.[0];
+        if (!c) throw new Error('Gemini không trả kết quả' + (j.promptFeedback?.blockReason ? ` (${j.promptFeedback.blockReason})` : ''));
+        return { text: (c.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join(''), finish: c.finishReason };
+      }
     } catch (e) {
-      if (a < retries) { await sleep(3000 * (a + 1)); continue; }
-      throw new Error('Không kết nối được tới Gemini (kiểm tra mạng).');
+      if (signal?.aborted) throw abortErr();
+      if (e.message?.startsWith('Gemini không trả')) throw e;
+      const why = timedOut ? `Gemini phản hồi quá lâu (quá ${timeoutSec} giây)` : 'Không kết nối được tới Gemini (kiểm tra mạng)';
+      if (a < retries) { await wait(3 * (a + 1), why); continue; }
+      throw new Error(why);
+    } finally { clearTimeout(tm); signal?.removeEventListener('abort', onAbort); }
+    if ((res.status === 429 || res.status >= 500) && a < retries) {
+      await wait(5 * (a + 1), res.status === 429 ? 'Gemini báo vượt giới hạn/hạn mức (429)' : `Gemini đang quá tải (${res.status})`); continue;
     }
-    if (res.ok) {
-      const j = await res.json();
-      const c = j.candidates?.[0];
-      if (!c) throw new Error('Gemini không trả kết quả' + (j.promptFeedback?.blockReason ? ` (${j.promptFeedback.blockReason})` : ''));
-      return { text: (c.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join(''), finish: c.finishReason };
-    }
-    if ((res.status === 429 || res.status >= 500) && a < retries) { await sleep(5000 * (a + 1)); continue; }
     throw await apiError(res);
   }
 }
+function abortErr() { const e = new Error('Đã bỏ qua'); e.aborted = true; return e; }
 function glossaryLine() { return cfg.glossary ? `\n- Các thuật ngữ, tên riêng có thể xuất hiện (viết đúng chính tả như sau): ${cfg.glossary}.` : ''; }
 const NO_SPEECH = '[KHONG_CO_LOI_NOI]';
 function chunkPrompt(prev) {
@@ -458,24 +469,42 @@ function flushChunk() {
 }
 async function processQueue() {
   if (rec.busy) return; rec.busy = true;
-  while (rec.queue.length) {
+  while (rec.queue.length && !rec.skip) {
     const item = rec.queue[0];
     if (item.note) { appendLive(item.start, item.note); rec.queue.shift(); await IDB.del(item.id); continue; }
-    setLiveStatus(`<span class="spinner"></span>Đang chuyển thành chữ... ${rec.queue.length > 1 ? `(còn ${rec.queue.length - 1} đoạn chờ)` : ''}`);
-    if (!navigator.onLine) { setLiveStatus('⚠ Mất mạng – âm thanh vẫn được giữ lại, sẽ chuyển thành chữ khi có mạng'); await sleep(5000); continue; }
+    if (!navigator.onLine) { setLiveStatus('⚠ Mất mạng – âm thanh vẫn được giữ lại, sẽ chuyển thành chữ khi có mạng' + skipBtn()); await sleep(3000); continue; }
     const prev = $('#liveText').value.slice(-250).replace(/\s+/g, ' ');
+    const left = rec.queue.length - 1, t0 = Date.now();
+    let why = '';
+    const show = () => setLiveStatus(`<span class="spinner"></span>Đang chờ Gemini chuyển thành chữ... ${Math.round((Date.now() - t0) / 1000)} giây${left ? ` (còn ${left} đoạn chờ)` : ''}${why ? `<br>⚠ ${esc(why)}` : ''}${skipBtn()}`);
+    show(); const tmr = setInterval(show, 1000);
+    rec.abortCtl = new AbortController();
     let text = '', ok = false;
-    for (let a = 0; a < 3; a++) {
-      try { text = cleanText((await gemini([{ inline_data: { mime_type: 'audio/wav', data: item.b64 } }, { text: chunkPrompt(prev) }])).text); ok = true; break; }
-      catch (e) { if (a === 2) { text = '(đoạn này lỗi, không chuyển được: ' + e.message.slice(0, 80) + ')'; toast(e.message, true, 7000); } else await sleep(6000); }
-    }
+    try {
+      text = cleanText((await gemini([{ inline_data: { mime_type: 'audio/wav', data: item.b64 } }, { text: chunkPrompt(prev) }],
+        { retries: 2, timeoutSec: 90, signal: rec.abortCtl.signal, onWait: m => { why = m; } })).text);
+      ok = true;
+    } catch (e) {
+      if (e.aborted) { clearInterval(tmr); break; }
+      text = '(đoạn này lỗi, không chuyển được: ' + e.message.slice(0, 120) + ')';
+      toast(e.message, true, 9000); rec.lastError = e.message;
+    } finally { clearInterval(tmr); }
     if (!ok && !navigator.onLine) continue;               // mất mạng giữa chừng → giữ lại, thử tiếp
     rec.queue.shift(); await IDB.del(item.id);
     if (text) appendLive(item.start, text);
   }
   rec.busy = false;
-  setLiveStatus(rec.active ? (rec.paused ? 'Đang tạm dừng' : 'Đang nghe...') : 'Đã dừng');
+  setLiveStatus(rec.active ? (rec.paused ? 'Đang tạm dừng' : 'Đang nghe...') : (rec.lastError ? '⚠ Có đoạn bị lỗi: ' + esc(rec.lastError.slice(0, 120)) : 'Đã dừng'));
 }
+function skipBtn() { return rec.active ? '' : ' <button id="btnSkip" style="padding:4px 10px;font-size:13px;margin-top:6px">Bỏ qua, tóm tắt luôn</button>'; }
+document.addEventListener('click', async e => {
+  if (e.target.id !== 'btnSkip') return;
+  const n = rec.queue.filter(i => !i.note).length;
+  rec.skip = true; rec.abortCtl?.abort();
+  for (const i of rec.queue) await IDB.del(i.id);
+  rec.queue = [];
+  if (n) appendLive(elapsed(), `(bỏ qua ${n} đoạn âm thanh chưa chuyển được thành chữ)`);
+});
 function appendLive(start, text) {
   const ta = $('#liveText'), atBottom = ta.scrollTop + ta.clientHeight >= ta.scrollHeight - 30;
   ta.value += (ta.value.trim() ? '\n' : '') + `[${mmss(start)}] ${text}`;
@@ -498,13 +527,17 @@ async function stopRec() {
   rec.elapsedBefore = elapsed();
   await closeCapture();
   stopKeepAlive(); releaseAwake(); setRecUI();
-  setLiveStatus('<span class="spinner"></span>Đang hoàn tất các đoạn cuối...');
-  while (rec.busy || rec.queue.length) await sleep(300);
-  setLiveStatus('Đã dừng');
+  rec.skip = false; rec.lastError = '';
+  if (!rec.busy) setLiveStatus('<span class="spinner"></span>Đang hoàn tất các đoạn cuối...' + skipBtn());
+  while ((rec.busy || rec.queue.length) && !rec.skip) await sleep(300);
+  while (rec.busy) await sleep(100);
+  rec.skip = false;
+  setLiveStatus(rec.lastError ? '⚠ Có đoạn bị lỗi: ' + esc(rec.lastError.slice(0, 120)) : 'Đã dừng');
   saveDraft();
   if (rec.gaps?.length) toast(`Lưu ý: có ${rec.gaps.length} lần mất âm thanh do app bị tạm dừng (đã ghi chú trong văn bản).`, true, 8000);
   const text = $('#liveText').value.trim();
-  if (text.length < 20) { toast('Chưa có nội dung đủ để tóm tắt.', true); return; }
+  const real = text.split('\n').filter(l => !/^\[[\d:]+\] \((đoạn này lỗi|bỏ qua|mất âm thanh)/.test(l)).join(' ');
+  if (real.length < 20) { toast(rec.lastError ? 'Chưa chuyển được đoạn nào thành chữ: ' + rec.lastError : 'Chưa có nội dung đủ để tóm tắt.', true, 9000); return; }
   newMeeting($('#liveTitle').value.trim(), 'Nghe trực tiếp', rec.startedAt, rec.elapsedBefore, text);
   await summarize();
 }
