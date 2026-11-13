@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f3d5e">
+<title>Thư ký cuộc họp</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root{--pri:#0f3d5e;--pri2:#1b6ca8;--red:#c62828;--bg:#f3f5f8;--card:#fff;--txt:#1d2530;--mut:#6b7684;--bd:#dde3ea;--ok:#2e7d32}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:16px}
+  header{background:var(--pri);color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
+  .brand{font-weight:700;font-size:18px}
+  #netStatus{font-size:12px;opacity:.85}
+  nav.tabs{display:flex;background:#fff;border-bottom:1px solid var(--bd);position:sticky;top:48px;z-index:4}
+  nav.tabs button{flex:1;border:0;background:none;padding:12px 4px;font-size:15px;color:var(--mut);border-bottom:3px solid transparent;cursor:pointer}
+  nav.tabs button.active{color:var(--pri);border-bottom-color:var(--pri);font-weight:600}
+  main{max-width:760px;margin:0 auto;padding:14px}
+  .tab{display:none}.tab.active{display:block}
+  label{display:block;margin:10px 0;font-size:14px;color:var(--mut)}
+  input[type=text],input[type=password],input[type=url],select,textarea{width:100%;margin-top:4px;padding:10px;border:1px solid var(--bd);border-radius:8px;font-size:15px;font-family:inherit;color:var(--txt);background:#fff}
+  textarea{resize:vertical;line-height:1.5}
+  button{font-family:inherit;font-size:15px;padding:10px 14px;border-radius:8px;border:1px solid var(--bd);background:#fff;color:var(--txt);cursor:pointer}
+  button:disabled{opacity:.45;cursor:default}
+  button.primary{background:var(--pri2);border-color:var(--pri2);color:#fff;font-weight:600}
+  button.ghost{background:none}
+  .row{display:flex;gap:10px;flex-wrap:wrap}.row>button{flex:1}
+  .muted{color:var(--mut);font-size:14px}
+  .hidden{display:none!important}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin:14px 0}
+  .banner{background:#fff6e0;border:1px solid #f0d58c;border-radius:8px;padding:10px;margin-bottom:10px;font-size:14px}
+  .banner button{padding:6px 10px;font-size:14px;margin-left:4px}
+  .recbox{display:flex;align-items:center;gap:18px;margin:16px 0}
+  .rec{width:84px;height:84px;border-radius:50%;background:var(--red);color:#fff;border:0;font-size:34px;box-shadow:0 3px 10px rgba(198,40,40,.35)}
+  .rec.on{animation:pulse 1.4s infinite}
+  .rec.paused{background:#9e9e9e;animation:none}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(198,40,40,.5)}70%{box-shadow:0 0 0 18px rgba(198,40,40,0)}100%{box-shadow:0 0 0 0 rgba(198,40,40,0)}}
+  .timer{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums}
+  .level{height:6px;background:#e4e8ee;border-radius:3px;overflow:hidden;margin:10px 0}
+  #levelBar{height:100%;width:0;background:var(--ok);transition:width .1s}
+  .progress{height:8px;background:#e4e8ee;border-radius:4px;overflow:hidden;margin:10px 0}
+  #fileProg{height:100%;width:0;background:var(--pri2);transition:width .3s}
+  .filepick input{margin-top:8px;width:100%}
+  #result h2{margin:0 0 4px;font-size:20px;color:var(--pri)}
+  #result h3{font-size:16px;margin:16px 0 6px;color:var(--pri)}
+  #result ul{margin:4px 0;padding-left:20px}#result li{margin:3px 0}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th,td{border:1px solid var(--bd);padding:6px;text-align:left;vertical-align:top}
+  th{background:#eef3f8}
+  .hist{border-bottom:1px solid var(--bd);padding:10px 0}
+  .hist b{display:block}
+  .hist .row{margin-top:6px}.hist .row button{flex:0 1 auto;padding:6px 10px;font-size:14px}
+  a{color:var(--pri2)}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#263238;color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;max-width:92%;z-index:20;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+  .toast.err{background:#b71c1c}
+  .help{font-size:14px;line-height:1.5;color:var(--mut)}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid #cfd8e3;border-top-color:var(--pri2);border-radius:50%;animation:spin 1s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header><div class="brand">🎙️ Thư ký cuộc họp</div><div id="netStatus"></div></header>
+<nav class="tabs">
+  <button data-tab="live" class="active">Trực tiếp</button>
+  <button data-tab="file">Từ file</button>
+  <button data-tab="history">Lịch sử</button>
+  <button data-tab="settings">Cài đặt</button>
+</nav>
+
+<main>
+  <div id="setupBanner" class="banner hidden">Chưa cài đặt xong. Vào tab <b>Cài đặt</b> để nhập Gemini API key và link Apps Script.</div>
+
+  <!-- TRỰC TIẾP -->
+  <section id="tab-live" class="tab active">
+    <div id="draftBanner" class="banner hidden">Có bản nháp chưa tóm tắt từ lần trước.
+      <button id="btnRestore">Khôi phục</button><button id="btnDiscard" class="ghost">Bỏ</button></div>
+    <label>Tên cuộc họp (không bắt buộc)<input type="text" id="liveTitle" placeholder="VD: Họp tiến độ dự án KCP"></label>
+    <div class="recbox">
+      <button id="btnRec" class="rec" aria-label="Bắt đầu">●</button>
+      <div><div id="timer" class="timer">00:00:00</div><div id="liveStatus" class="muted">Bấm nút đỏ để bắt đầu nghe</div></div>
+    </div>
+    <div class="row">
+      <button id="btnPause" disabled>⏸ Tạm dừng</button>
+      <button id="btnStop" class="primary" disabled>■ Kết thúc &amp; tóm tắt</button>
+    </div>
+    <div class="level"><div id="levelBar"></div></div>
+    <label>Nội dung chuyển thành văn bản (sửa được)
+      <textarea id="liveText" rows="12" placeholder="Văn bản hiện ra theo từng đoạn, chậm khoảng 1 phút so với lời nói..."></textarea></label>
+    <div class="row" style="margin-bottom:10px"><button id="btnNew" class="ghost">🗒 Bắt đầu cuộc họp mới (xóa nội dung trên)</button></div>
+    <div class="muted">Mẹo: đặt điện thoại giữa bàn họp, để màn hình luôn sáng (app tự giữ sáng màn hình khi đang nghe). Âm thanh chỉ được gửi đi để chuyển thành chữ rồi bỏ, không lưu file ghi âm.</div>
+  </section>
+
+  <!-- TỪ FILE -->
+  <section id="tab-file" class="tab">
+    <label>Tên cuộc họp (không bắt buộc)<input type="text" id="fileTitle" placeholder="VD: Họp với KCP về nghiệm thu bồn"></label>
+    <label class="filepick">Chọn file ghi âm (mp3, m4a, wav, aac, ogg, flac, mp4...)
+      <input type="file" id="fileInput" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.ogg,.opus,.flac,.amr,.3gp,.webm,.mp4"></label>
+    <div id="fileInfo" class="muted"></div>
+    <div class="row" style="margin-top:10px"><button id="btnFileGo" class="primary" disabled>Chuyển văn bản &amp; tóm tắt</button></div>
+    <div class="progress hidden" id="fileProgWrap"><div id="fileProg"></div></div>
+    <div id="fileStatus" class="muted"></div>
+    <label>Nội dung chuyển thành văn bản (sửa được)
+      <textarea id="fileText" rows="12" placeholder="Bạn cũng có thể dán sẵn một bản chép lời vào đây rồi bấm Tóm tắt."></textarea></label>
+    <div class="row"><button id="btnFileSummarize">Tóm tắt từ văn bản ở trên</button></div>
+  </section>
+
+  <!-- LỊCH SỬ -->
+  <section id="tab-history" class="tab">
+    <div class="muted">Các cuộc họp đã xử lý trên điện thoại này (tối đa 30 cuộc gần nhất).</div>
+    <div id="histList"></div>
+  </section>
+
+  <!-- CÀI ĐẶT -->
+  <section id="tab-settings" class="tab">
+    <div class="card">
+      <b>1. Gemini (chuyển giọng nói → chữ và tóm tắt)</b>
+      <label>Gemini API key<input type="password" id="cfgKey" placeholder="AIza..." autocomplete="off"></label>
+      <label>Model<input type="text" id="cfgModel" list="models"></label>
+      <datalist id="models"><option value="gemini-flash-latest"><option value="gemini-2.5-flash"><option value="gemini-pro-latest"><option value="gemini-2.5-pro"></datalist>
+      <label>Độ dài mỗi đoạn khi nghe trực tiếp
+        <select id="cfgChunk"><option value="30">30 giây (hiện chữ nhanh hơn)</option><option value="45">45 giây</option><option value="60">60 giây (đủ ngữ cảnh hơn)</option><option value="90">90 giây</option></select></label>
+      <label>Thuật ngữ, tên riêng hay gặp (giúp chép đúng chính tả)
+        <textarea id="cfgGloss" rows="3" placeholder="VD: DHC, KCP, Đăk Pone, penstock, cửa van, khe van, xi lanh thủy lực, nghiệm thu, bảo lãnh"></textarea></label>
+      <button id="btnTestGemini">Kiểm tra Gemini</button>
+    </div>
+    <div class="card">
+      <b>2. Google Docs (qua Apps Script của bạn)</b>
+      <label>Link Web App của Apps Script<input type="url" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec"></label>
+      <label>Mã bảo mật (TOKEN, phải trùng với trong Apps Script)<input type="password" id="cfgToken" autocomplete="off"></label>
+      <label style="color:var(--txt)"><input type="checkbox" id="cfgAuto"> Tự động lưu vào Google Docs sau khi tóm tắt xong</label>
+      <button id="btnTestDocs">Kiểm tra kết nối Google Docs</button>
+    </div>
+    <div class="row"><button id="btnSaveCfg" class="primary">Lưu cài đặt</button></div>
+    <p class="help">API key và link chỉ lưu trên trình duyệt của điện thoại này, không gửi đi đâu khác ngoài Google.</p>
+  </section>
+
+  <!-- KẾT QUẢ (dùng chung) -->
+  <section id="result" class="card hidden">
+    <div id="resBody"></div>
+    <div class="row" style="margin-top:14px">
+      <button id="btnSaveDoc" class="primary">💾 Lưu vào Google Docs</button>
+      <button id="btnCopy">📋 Sao chép</button>
+    </div>
+    <div class="row" style="margin-top:8px"><button id="btnResum">🔄 Tóm tắt lại</button><button id="btnCloseRes" class="ghost">Đóng</button></div>
+    <div id="docLink" style="margin-top:10px"></div>
+  </section>
+</main>
+
+<script>
+/* ============ TIỆN ÍCH ============ */
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
+  del(k) { try { localStorage.removeItem(k); } catch {} }
+};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = n => String(n).padStart(2, '0');
+function hms(sec) { sec = Math.max(0, Math.round(sec)); return `${pad(Math.floor(sec/3600))}:${pad(Math.floor(sec%3600/60))}:${pad(sec%60)}`; }
+function mmss(sec) { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = sec%60; return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`; }
+function geminiTs(sec) { sec = Math.round(sec); return `${pad(Math.floor(sec/60))}:${pad(sec%60)}`; }
+function fmtDate(d) { d = new Date(d); return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+let toastTimer;
+function toast(msg, err = false, ms = 4000) {
+  let t = $('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.toggle('err', err); t.classList.remove('hidden');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
+}
+
+/* ============ CÀI ĐẶT ============ */
+let cfg = Object.assign({ apiKey: '', model: 'gemini-flash-latest', chunkSec: 45, scriptUrl: '', token: '', glossary: '', autoSave: false }, LS.get('tkh_cfg', {}));
+function loadCfgUI() {
+  $('#cfgKey').value = cfg.apiKey; $('#cfgModel').value = cfg.model; $('#cfgChunk').value = String(cfg.chunkSec);
+  $('#cfgGloss').value = cfg.glossary; $('#cfgUrl').value = cfg.scriptUrl; $('#cfgToken').value = cfg.token; $('#cfgAuto').checked = cfg.autoSave;
+  $('#setupBanner').classList.toggle('hidden', !!cfg.apiKey);
+}
+function readCfgUI() {
+  cfg.apiKey = $('#cfgKey').value.trim(); cfg.model = $('#cfgModel').value.trim() || 'gemini-flash-latest';
+  cfg.chunkSec = +$('#cfgChunk').value || 45; cfg.glossary = $('#cfgGloss').value.trim();
+  cfg.scriptUrl = $('#cfgUrl').value.trim(); cfg.token = $('#cfgToken').value.trim(); cfg.autoSave = $('#cfgAuto').checked;
+}
+$('#btnSaveCfg').onclick = () => { readCfgUI(); LS.set('tkh_cfg', cfg) ? toast('Đã lưu cài đặt') : toast('Không lưu được (trình duyệt chặn bộ nhớ)', true); loadCfgUI(); };
+$('#btnTestGemini').onclick = async () => {
+  readCfgUI(); toast('Đang kiểm tra Gemini...');
+  try { const r = await gemini([{ text: 'Trả lời đúng một từ: OK' }], { retries: 0 }); toast('Gemini hoạt động: ' + r.text.trim().slice(0, 30)); }
+  catch (e) { toast('Lỗi Gemini: ' + e.message, true, 8000); }
+};
+$('#btnTestDocs').onclick = async () => {
+  readCfgUI(); toast('Đang kiểm tra Apps Script...');
+  try { const j = await callScript({ action: 'ping' }); toast('Kết nối Google Docs OK' + (j.folder ? ` (thư mục: ${j.folder})` : '')); }
+  catch (e) { toast(e.message, true, 9000); }
+};
+
+/* ============ TABS ============ */
+document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+function showTab(name) {
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + name));
+  $('#result').classList.toggle('hidden', name === 'settings' || !current || !current.summaryShown);
+  if (name === 'history') renderHistory();
+}
+function updateNet() { $('#netStatus').textContent = navigator.onLine ? '' : '⚠ Mất mạng'; }
+addEventListener('online', updateNet); addEventListener('offline', updateNet);
+
+/* ============ GEMINI ============ */
+const API = 'https://generativelanguage.googleapis.com';
+async function apiError(res) {
+  let msg = '';
+  try { const j = await res.json(); msg = j.error?.message || JSON.stringify(j); } catch { msg = res.statusText; }
+  if (res.status === 400 && /API key/i.test(msg)) msg = 'API key không hợp lệ. ' + msg;
+  if (res.status === 429) msg = 'Vượt giới hạn/hạn mức của Gemini, thử lại sau ít phút. ' + msg;
+  const e = new Error(`[${res.status}] ${msg}`); e.status = res.status; return e;
+}
+async function gemini(parts, { schema = null, temperature = 0.2, retries = 3 } = {}) {
+  if (!cfg.apiKey) throw new Error('Chưa nhập Gemini API key (tab Cài đặt).');
+  const body = { contents: [{ role: 'user', parts }], generationConfig: { temperature } };
+  if (schema) { body.generationConfig.responseMimeType = 'application/json'; body.generationConfig.responseSchema = schema; }
+  for (let a = 0; ; a++) {
+    let res;
+    try {
+      res = await fetch(`${API}/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey }, body: JSON.stringify(body)
+      });
+    } catch (e) {
+      if (a < retries) { await sleep(3000 * (a + 1)); continue; }
+      throw new Error('Không kết nối được tới Gemini (kiểm tra mạng).');
+    }
+    if (res.ok) {
+      const j = await res.json();
+      const c = j.candidates?.[0];
+      if (!c) throw new Error('Gemini không trả kết quả' + (j.promptFeedback?.blockReason ? ` (${j.promptFeedback.blockReason})` : ''));
+      return { text: (c.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join(''), finish: c.finishReason };
+    }
+    if ((res.status === 429 || res.status >= 500) && a < retries) { await sleep(5000 * (a + 1)); continue; }
+    throw await apiError(res);
+  }
+}
+function glossaryLine() { return cfg.glossary ? `\n- Các thuật ngữ, tên riêng có thể xuất hiện (viết đúng chính tả như sau): ${cfg.glossary}.` : ''; }
+const NO_SPEECH = '[KHONG_CO_LOI_NOI]';
+function chunkPrompt(prev) {
+  return `Bạn là thư ký ghi biên bản cuộc họp. Hãy chép lại NGUYÊN VĂN lời nói trong đoạn âm thanh này bằng tiếng Việt có dấu, đúng chính tả.
+- Giữ nguyên thuật ngữ kỹ thuật và từ tiếng Anh như người nói dùng; số liệu ghi bằng chữ số.
+- Bỏ các từ đệm vô nghĩa (ờ, à, ừm...) nhưng KHÔNG tóm tắt, KHÔNG thêm ý.
+- Khi rõ ràng đổi người nói, xuống dòng mới và bắt đầu bằng "- ".
+- Nếu đoạn âm thanh không có lời nói rõ ràng, chỉ trả về đúng chuỗi: ${NO_SPEECH}
+- Chỉ trả về văn bản đã chép, không giải thích.${glossaryLine()}${prev ? `\nĐoạn ngay trước đó (chỉ để hiểu mạch, KHÔNG chép lại): "...${prev}"` : ''}`;
+}
+function filePrompt(seg) {
+  return `Bạn là thư ký ghi biên bản cuộc họp. Hãy chép lại NGUYÊN VĂN lời nói trong file âm thanh bằng tiếng Việt có dấu, đúng chính tả.
+${seg ? `- CHỈ chép phần âm thanh từ mốc ${geminiTs(seg[0])} đến mốc ${geminiTs(seg[1])} của file (định dạng phút:giây), không chép phần khác.` : '- Chép toàn bộ file từ đầu đến cuối, không bỏ sót.'}
+- Chia đoạn theo lượt nói. Mỗi đoạn bắt đầu bằng mốc thời gian [mm:ss] và nhãn người nói (Người nói 1, Người nói 2... hoặc tên/chức danh nếu được nhắc rõ), ví dụ: [12:05] Người nói 1: ...
+- Giữ nguyên thuật ngữ kỹ thuật và từ tiếng Anh; số liệu ghi bằng chữ số; bỏ từ đệm vô nghĩa; KHÔNG tóm tắt, KHÔNG thêm ý.
+- Nếu phần được yêu cầu không có lời nói, trả về đúng chuỗi: ${NO_SPEECH}
+- Chỉ trả về văn bản đã chép, không giải thích.${glossaryLine()}`;
+}
+const cleanText = t => (t || '').replace(/^```[a-z]*\n?|```$/g, '').replace(NO_SPEECH, '').trim();
+
+const SUMMARY_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    tieu_de: { type: 'STRING', description: 'Tên ngắn gọn của cuộc họp' },
+    tom_tat: { type: 'STRING', description: 'Tóm tắt chung 3-5 câu' },
+    thanh_phan: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Người/đơn vị tham dự nếu nhận ra được' },
+    noi_dung_chinh: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+      chu_de: { type: 'STRING' }, chi_tiet: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['chu_de', 'chi_tiet'] } },
+    ket_luan: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Các quyết định, kết luận đã thống nhất' },
+    viec_can_lam: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+      cong_viec: { type: 'STRING' }, phu_trach: { type: 'STRING' }, han: { type: 'STRING' } }, required: ['cong_viec', 'phu_trach', 'han'] } },
+    van_de_ton_dong: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Vấn đề chưa thống nhất, cần làm rõ thêm' }
+  },
+  required: ['tieu_de', 'tom_tat', 'thanh_phan', 'noi_dung_chinh', 'ket_luan', 'viec_can_lam', 'van_de_ton_dong']
+};
+function summaryPrompt(title, transcript) {
+  return `Dưới đây là bản chép lời một cuộc họp (có thể có lỗi nhận dạng giọng nói; hãy hiểu theo ngữ cảnh).
+Hãy lập biên bản tóm tắt bằng tiếng Việt: chính xác, súc tích, giữ đúng số liệu, mốc thời gian, tên riêng. KHÔNG bịa thông tin không có trong nội dung.
+- Nội dung chính: gom theo chủ đề, mỗi chủ đề vài gạch đầu dòng ngắn.
+- Việc cần làm: nêu rõ việc; nếu không nói rõ người phụ trách hoặc hạn thì ghi "Chưa rõ".
+- Mục nào không có thông tin thì để mảng rỗng.${glossaryLine()}
+${title ? `Tên cuộc họp do người dùng đặt: ${title}\n` : ''}
+===== BẢN CHÉP LỜI =====
+${transcript}`;
+}
+
+/* ============ GHI TRỰC TIẾP ============ */
+const TARGET_RATE = 16000;
+const rec = { active: false, paused: false, stream: null, ctx: null, src: null, proc: null, inRate: 16000,
+  bufs: [], bufLen: 0, total: 0, chunkStart: 0, queue: [], busy: false, timerId: null, wakeLock: null, startedAt: null, level: 0 };
+
+function downsample(buf, inRate, outRate) {
+  if (inRate === outRate) return buf;
+  const ratio = inRate / outRate, len = Math.floor(buf.length / ratio), out = new Float32Array(len);
+  for (let i = 0; i < len; i++) {
+    const s = Math.floor(i * ratio), e = Math.min(buf.length, Math.floor((i + 1) * ratio));
+    let sum = 0; for (let j = s; j < e; j++) sum += buf[j];
+    out[i] = sum / Math.max(1, e - s);
+  }
+  return out;
+}
+function encodeWAV(samples, rate) {
+  const buf = new ArrayBuffer(44 + samples.length * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0, o = 44; i < samples.length; i++, o += 2) { const s = Math.max(-1, Math.min(1, samples[i])); v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7FFF, true); }
+  return buf;
+}
+function abToB64(ab) {
+  const u8 = new Uint8Array(ab); let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function rms(a) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i]; return Math.sqrt(s / Math.max(1, a.length)); }
+function normalize(a) { // nâng âm lượng nếu ghi quá nhỏ (người nói xa điện thoại)
+  let peak = 0; for (let i = 0; i < a.length; i++) peak = Math.max(peak, Math.abs(a[i]));
+  if (peak > 0 && peak < 0.5) { const g = Math.min(8, 0.9 / peak); for (let i = 0; i < a.length; i++) a[i] *= g; }
+  return a;
+}
+
+async function startRec() {
+  if (!cfg.apiKey) { toast('Cần nhập Gemini API key trong tab Cài đặt trước.', true); showTab('settings'); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { toast('Trình duyệt không hỗ trợ micro (cần mở bằng Chrome qua https).', true); return; }
+  try {
+    rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+  } catch (e) { toast('Không mở được micro: ' + e.message + '. Hãy cho phép quyền micro.', true, 8000); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  try { rec.ctx = new AC({ sampleRate: TARGET_RATE }); } catch { rec.ctx = new AC(); }
+  rec.inRate = rec.ctx.sampleRate;
+  rec.src = rec.ctx.createMediaStreamSource(rec.stream);
+  rec.proc = rec.ctx.createScriptProcessor(4096, 1, 1);
+  rec.proc.onaudioprocess = e => {
+    if (!rec.active || rec.paused) return;
+    const d = e.inputBuffer.getChannelData(0);
+    rec.bufs.push(new Float32Array(d)); rec.bufLen += d.length; rec.total += d.length;
+    rec.level = Math.min(1, rms(d) * 6);
+    if (rec.bufLen >= cfg.chunkSec * rec.inRate) flushChunk();
+  };
+  rec.src.connect(rec.proc); rec.proc.connect(rec.ctx.destination);
+  const continuing = $('#liveText').value.trim().length > 0 && rec.startedAt;
+  if (!continuing) { rec.total = 0; rec.startedAt = new Date(); rec.offset = 0; }
+  else { rec.offset = rec.elapsedBefore || 0; rec.total = 0; }
+  rec.bufs = []; rec.bufLen = 0; rec.chunkStart = 0;
+  rec.active = true; rec.paused = false;
+  await keepAwake();
+  rec.timerId = setInterval(tick, 250);
+  setRecUI();
+}
+function elapsed() { return (rec.offset || 0) + rec.total / rec.inRate; }
+function tick() {
+  $('#timer').textContent = hms(elapsed());
+  $('#levelBar').style.width = (rec.paused ? 0 : rec.level * 100) + '%';
+  rec.level *= 0.85;
+}
+function flushChunk() {
+  if (!rec.bufLen) return;
+  const merged = new Float32Array(rec.bufLen); let o = 0;
+  for (const b of rec.bufs) { merged.set(b, o); o += b.length; }
+  rec.bufs = []; rec.bufLen = 0;
+  const start = (rec.offset || 0) + rec.chunkStart;
+  rec.chunkStart = rec.total / rec.inRate;
+  if (merged.length < rec.inRate * 1.5) return;          // quá ngắn
+  if (rms(merged) < 0.0015) return;                      // im lặng → không gửi, tránh "bịa chữ"
+  const pcm = normalize(downsample(merged, rec.inRate, TARGET_RATE));
+  rec.queue.push({ start, b64: abToB64(encodeWAV(pcm, TARGET_RATE)) });
+  processQueue();
+}
+async function processQueue() {
+  if (rec.busy) return; rec.busy = true;
+  while (rec.queue.length) {
+    const item = rec.queue.shift();
+    setLiveStatus(`<span class="spinner"></span>Đang chuyển thành chữ... ${rec.queue.length ? `(còn ${rec.queue.length} đoạn chờ)` : ''}`);
+    const prev = $('#liveText').value.slice(-250).replace(/\s+/g, ' ');
+    let text = '';
+    for (let a = 0; a < 3; a++) {
+      try { text = cleanText((await gemini([{ inline_data: { mime_type: 'audio/wav', data: item.b64 } }, { text: chunkPrompt(prev) }])).text); break; }
+      catch (e) { if (a === 2) { text = '(đoạn này lỗi, không chuyển được: ' + e.message.slice(0, 80) + ')'; toast(e.message, true, 7000); } else await sleep(6000); }
+    }
+    if (text) appendLive(item.start, text);
+  }
+  rec.busy = false;
+  setLiveStatus(rec.active ? (rec.paused ? 'Đang tạm dừng' : 'Đang nghe...') : 'Đã dừng');
+}
+function appendLive(start, text) {
+  const ta = $('#liveText'), atBottom = ta.scrollTop + ta.clientHeight >= ta.scrollHeight - 30;
+  ta.value += (ta.value.trim() ? '\n' : '') + `[${mmss(start)}] ${text}`;
+  if (atBottom) ta.scrollTop = ta.scrollHeight;
+  saveDraft();
+}
+function saveDraft() {
+  LS.set('tkh_draft', { title: $('#liveTitle').value, text: $('#liveText').value, startedAt: rec.startedAt, elapsed: elapsed() });
+}
+function togglePause() {
+  if (!rec.active) return;
+  rec.paused = !rec.paused;
+  if (rec.paused) flushChunk();
+  setRecUI();
+}
+async function stopRec() {
+  if (!rec.active) return;
+  rec.active = false; flushChunk();
+  clearInterval(rec.timerId); tick();
+  rec.elapsedBefore = elapsed();
+  try { rec.proc.disconnect(); rec.src.disconnect(); } catch {}
+  rec.stream?.getTracks().forEach(t => t.stop());
+  try { await rec.ctx.close(); } catch {}
+  releaseAwake(); setRecUI();
+  setLiveStatus('<span class="spinner"></span>Đang hoàn tất các đoạn cuối...');
+  while (rec.busy || rec.queue.length) await sleep(300);
+  setLiveStatus('Đã dừng');
+  saveDraft();
+  const text = $('#liveText').value.trim();
+  if (text.length < 20) { toast('Chưa có nội dung đủ để tóm tắt.', true); return; }
+  newMeeting($('#liveTitle').value.trim(), 'Nghe trực tiếp', rec.startedAt, rec.elapsedBefore, text);
+  await summarize();
+}
+function setLiveStatus(html) { $('#liveStatus').innerHTML = html; }
+function setRecUI() {
+  const b = $('#btnRec');
+  b.classList.toggle('on', rec.active && !rec.paused); b.classList.toggle('paused', rec.active && rec.paused);
+  b.disabled = rec.active; b.textContent = '●';
+  $('#btnPause').disabled = !rec.active; $('#btnPause').textContent = rec.paused ? '▶ Tiếp tục' : '⏸ Tạm dừng';
+  $('#btnStop').disabled = !rec.active;
+  if (rec.active && !rec.busy) setLiveStatus(rec.paused ? 'Đang tạm dừng' : 'Đang nghe...');
+}
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) { rec.wakeLock = await navigator.wakeLock.request('screen'); } } catch {}
+}
+function releaseAwake() { try { rec.wakeLock?.release(); } catch {} rec.wakeLock = null; }
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && rec.active) keepAwake();
+  if (document.visibilityState === 'hidden' && rec.active) saveDraft();
+});
+addEventListener('beforeunload', e => { if (rec.active || rec.busy) { e.preventDefault(); e.returnValue = ''; } });
+$('#btnRec').onclick = startRec;
+$('#btnPause').onclick = togglePause;
+$('#btnStop').onclick = stopRec;
+$('#liveText').addEventListener('input', () => { if ($('#liveText').value) saveDraft(); });
+
+// Bản nháp
+(function checkDraft() {
+  const d = LS.get('tkh_draft', null);
+  if (d && d.text && d.text.trim()) $('#draftBanner').classList.remove('hidden');
+})();
+$('#btnRestore').onclick = () => {
+  const d = LS.get('tkh_draft', null); if (!d) return;
+  $('#liveTitle').value = d.title || ''; $('#liveText').value = d.text || '';
+  rec.startedAt = d.startedAt ? new Date(d.startedAt) : new Date(); rec.elapsedBefore = d.elapsed || 0; rec.offset = rec.elapsedBefore;
+  $('#timer').textContent = hms(rec.elapsedBefore);
+  $('#draftBanner').classList.add('hidden');
+  toast('Đã khôi phục. Bấm nút đỏ để nghe tiếp, hoặc bấm "Tóm tắt" bên dưới.');
+  showResumeButton();
+};
+$('#btnNew').onclick = e => {
+  if (rec.active) return toast('Đang nghe, hãy bấm Kết thúc trước.', true);
+  const b = e.currentTarget;
+  if (!b.dataset.confirm && $('#liveText').value.trim()) { b.dataset.confirm = 1; b.textContent = 'Bấm lần nữa để xóa nội dung hiện tại'; setTimeout(() => { delete b.dataset.confirm; b.textContent = '🗒 Bắt đầu cuộc họp mới (xóa nội dung trên)'; }, 4000); return; }
+  delete b.dataset.confirm; b.textContent = '🗒 Bắt đầu cuộc họp mới (xóa nội dung trên)';
+  $('#liveText').value = ''; $('#liveTitle').value = ''; $('#timer').textContent = '00:00:00';
+  rec.startedAt = null; rec.elapsedBefore = 0; rec.offset = 0; LS.del('tkh_draft');
+  $('#btnStop').disabled = true; setLiveStatus('Bấm nút đỏ để bắt đầu nghe');
+};
+$('#btnDiscard').onclick =() => { LS.del('tkh_draft'); $('#draftBanner').classList.add('hidden'); };
+function showResumeButton() {
+  $('#btnStop').disabled = false;
+  $('#btnStop').onclick = async () => {
+    if (rec.active) return stopRec();
+    const text = $('#liveText').value.trim();
+    if (text.length < 20) return toast('Chưa có nội dung đủ để tóm tắt.', true);
+    newMeeting($('#liveTitle').value.trim(), 'Nghe trực tiếp', rec.startedAt || new Date(), rec.elapsedBefore || 0, text);
+    await summarize();
+  };
+}
+
+/* ============ TỪ FILE ============ */
+let pickedFile = null, pickedDur = 0;
+const MIME = { mp3: 'audio/mp3', wav: 'audio/wav', m4a: 'audio/mp4', mp4: 'video/mp4', aac: 'audio/aac', ogg: 'audio/ogg', opus: 'audio/ogg',
+  flac: 'audio/flac', webm: 'audio/webm', amr: 'audio/amr', '3gp': 'audio/3gpp', aiff: 'audio/aiff', aif: 'audio/aiff' };
+function guessMime(f) { const ext = (f.name.split('.').pop() || '').toLowerCase(); return MIME[ext] || f.type || 'audio/mpeg'; }
+function getDuration(f) {
+  return new Promise(res => {
+    const url = URL.createObjectURL(f), a = document.createElement('audio'); a.preload = 'metadata';
+    const done = d => { URL.revokeObjectURL(url); res(isFinite(d) && d > 0 ? d : 0); };
+    a.onloadedmetadata = () => done(a.duration); a.onerror = () => done(0); setTimeout(() => done(0), 10000); a.src = url;
+  });
+}
+$('#fileInput').onchange = async e => {
+  pickedFile = e.target.files[0] || null; pickedDur = 0;
+  $('#btnFileGo').disabled = !pickedFile;
+  if (!pickedFile) { $('#fileInfo').textContent = ''; return; }
+  $('#fileInfo').textContent = `${pickedFile.name} — ${(pickedFile.size / 1048576).toFixed(1)} MB — đang đọc thời lượng...`;
+  pickedDur = await getDuration(pickedFile);
+  $('#fileInfo').textContent = `${pickedFile.name} — ${(pickedFile.size / 1048576).toFixed(1)} MB${pickedDur ? ' — ' + hms(pickedDur) : ''}`;
+  if (!$('#fileTitle').value) $('#fileTitle').value = '';
+};
+function setFileStatus(html) { $('#fileStatus').innerHTML = html; }
+function setProg(p) { $('#fileProgWrap').classList.toggle('hidden', p == null); if (p != null) $('#fileProg').style.width = Math.round(p * 100) + '%'; }
+
+function uploadToGemini(file, mime, onProg) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const start = await fetch(`${API}/upload/v1beta/files`, { method: 'POST', headers: {
+        'x-goog-api-key': cfg.apiKey, 'X-Goog-Upload-Protocol': 'resumable', 'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': String(file.size), 'X-Goog-Upload-Header-Content-Type': mime, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: { display_name: file.name.slice(0, 100) } }) });
+      if (!start.ok) return reject(await apiError(start));
+      const upUrl = start.headers.get('x-goog-upload-url');
+      if (!upUrl) return reject(new Error('Không nhận được link tải lên'));
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', upUrl);
+      xhr.setRequestHeader('X-Goog-Upload-Offset', '0');
+      xhr.setRequestHeader('X-Goog-Upload-Command', 'upload, finalize');
+      xhr.upload.onprogress = ev => ev.lengthComputable && onProg(ev.loaded / ev.total);
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) { try { resolve(JSON.parse(xhr.responseText).file); } catch (e) { reject(e); } }
+        else { const e = new Error(`[${xhr.status}] Tải file lên thất bại`); e.status = xhr.status; reject(e); }
+      };
+      xhr.onerror = () => reject(new Error('Mất kết nối khi tải file lên'));
+      xhr.send(file);
+    } catch (e) { reject(e); }
+  });
+}
+async function waitActive(f) {
+  for (let i = 0; i < 120; i++) {
+    if (f.state === 'ACTIVE') return f;
+    if (f.state === 'FAILED') throw new Error('Gemini không xử lý được file này');
+    await sleep(3000);
+    const r = await fetch(`${API}/v1beta/${f.name}`, { headers: { 'x-goog-api-key': cfg.apiKey } });
+    if (!r.ok) throw await apiError(r);
+    f = await r.json();
+  }
+  throw new Error('Gemini xử lý file quá lâu');
+}
+function deleteGeminiFile(name) { fetch(`${API}/v1beta/${name}`, { method: 'DELETE', headers: { 'x-goog-api-key': cfg.apiKey } }).catch(() => {}); }
+const isAuthErr = e => e && (e.status === 401 || e.status === 403 || /API key/i.test(e.message) || e.status === 429);
+
+async function transcribeFile(file, dur) {
+  const mime = guessMime(file);
+  let gf = null;
+  try {
+    setFileStatus('<span class="spinner"></span>Đang tải file lên Gemini...'); setProg(0);
+    gf = await uploadToGemini(file, mime, p => { setProg(p); setFileStatus(`<span class="spinner"></span>Đang tải file lên Gemini... ${Math.round(p * 100)}%`); });
+    setFileStatus('<span class="spinner"></span>Gemini đang đọc file...');
+    gf = await waitActive(gf);
+  } catch (e) {
+    if (isAuthErr(e)) throw e;
+    console.warn('Upload failed, fallback:', e);
+    return transcribeByDecoding(file);
+  }
+  const SEG = 20 * 60;
+  const segs = dur > SEG * 1.25 ? Array.from({ length: Math.ceil(dur / SEG) }, (_, i) => [i * SEG, Math.min(dur, (i + 1) * SEG)]) : [null];
+  const out = [];
+  for (let i = 0; i < segs.length; i++) {
+    setFileStatus(`<span class="spinner"></span>Đang chuyển thành chữ ${segs.length > 1 ? `phần ${i + 1}/${segs.length}` : ''}... (file dài có thể mất vài phút)`);
+    setProg(i / segs.length);
+    let r;
+    try { r = await gemini([{ file_data: { mime_type: gf.mimeType || mime, file_uri: gf.uri } }, { text: filePrompt(segs[i]) }]); }
+    catch (e) {
+      if (i === 0 && e.status === 400 && !/API key/i.test(e.message)) { deleteGeminiFile(gf.name); return transcribeByDecoding(file); }
+      throw e;
+    }
+    const t = cleanText(r.text); if (t) out.push(t);
+    if (r.finish === 'MAX_TOKENS') toast(`Phần ${i + 1} quá dài nên có thể bị cắt cuối.`, true, 7000);
+    $('#fileText').value = out.join('\n\n');
+  }
+  deleteGeminiFile(gf.name);
+  setProg(1);
+  return out.join('\n\n');
+}
+async function transcribeByDecoding(file) {
+  setFileStatus('<span class="spinner"></span>Đang giải mã âm thanh trên máy (cách dự phòng)...'); setProg(0);
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let ctx; try { ctx = new AC({ sampleRate: TARGET_RATE }); } catch { ctx = new AC(); }
+  let audio;
+  try { audio = await ctx.decodeAudioData(await file.arrayBuffer()); }
+  catch { try { ctx.close(); } catch {} throw new Error('Không đọc được định dạng file này. Hãy chuyển sang mp3/m4a/wav rồi thử lại.'); }
+  const len = audio.length, ch = audio.numberOfChannels, mono = new Float32Array(len);
+  for (let c = 0; c < ch; c++) { const d = audio.getChannelData(c); for (let i = 0; i < len; i++) mono[i] += d[i] / ch; }
+  const pcm = downsample(mono, audio.sampleRate, TARGET_RATE); try { ctx.close(); } catch {}
+  const STEP = 5 * 60 * TARGET_RATE, n = Math.ceil(pcm.length / STEP), out = [];
+  for (let i = 0; i < n; i++) {
+    setFileStatus(`<span class="spinner"></span>Đang chuyển thành chữ đoạn ${i + 1}/${n}...`); setProg(i / n);
+    const part = pcm.slice(i * STEP, (i + 1) * STEP);
+    if (rms(part) < 0.0015) continue;
+    const prev = out.join(' ').slice(-250);
+    const r = await gemini([{ inline_data: { mime_type: 'audio/wav', data: abToB64(encodeWAV(normalize(part), TARGET_RATE)) } }, { text: chunkPrompt(prev) }]);
+    const t = cleanText(r.text); if (t) out.push(`[${mmss(i * 300)}] ${t}`);
+    $('#fileText').value = out.join('\n\n');
+  }
+  setProg(1);
+  return out.join('\n\n');
+}
+$('#btnFileGo').onclick = async () => {
+  if (!pickedFile) return;
+  if (!cfg.apiKey) { toast('Cần nhập Gemini API key trong tab Cài đặt trước.', true); return showTab('settings'); }
+  $('#btnFileGo').disabled = true; $('#fileText').value = '';
+  try {
+    const text = await transcribeFile(pickedFile, pickedDur);
+    setFileStatus('Đã chuyển xong thành chữ.');
+    if (text.trim().length < 20) { toast('Không nhận được lời nói trong file.', true); return; }
+    newMeeting($('#fileTitle').value.trim(), 'File: ' + pickedFile.name, new Date(pickedFile.lastModified || Date.now()), pickedDur, text);
+    await summarize();
+  } catch (e) { setFileStatus('Lỗi: ' + esc(e.message)); toast(e.message, true, 9000); }
+  finally { $('#btnFileGo').disabled = false; setTimeout(() => setProg(null), 1500); }
+};
+$('#btnFileSummarize').onclick = async () => {
+  const text = $('#fileText').value.trim();
+  if (text.length < 20) return toast('Chưa có văn bản để tóm tắt.', true);
+  if (current && current.source.startsWith('File') && current.transcript !== text) current.transcript = text;
+  else newMeeting($('#fileTitle').value.trim(), pickedFile ? 'File: ' + pickedFile.name : 'Văn bản dán vào', new Date(), pickedDur, text);
+  await summarize();
+};
+
+/* ============ TÓM TẮT & KẾT QUẢ ============ */
+let current = null;
+function newMeeting(title, source, date, duration, transcript) {
+  current = { id: Date.now(), title, source, date: (date ? new Date(date) : new Date()).toISOString(), duration: duration || 0, transcript, summary: null, docUrl: '', summaryShown: false };
+}
+async function summarize() {
+  if (!current) return;
+  const res = $('#result'); res.classList.remove('hidden'); current.summaryShown = true;
+  $('#resBody').innerHTML = '<p><span class="spinner"></span>Đang lập biên bản tóm tắt...</p>'; $('#docLink').innerHTML = '';
+  setResButtons(false);
+  res.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  try {
+    const r = await gemini([{ text: summaryPrompt(current.title, current.transcript) }], { schema: SUMMARY_SCHEMA, temperature: 0.3 });
+    current.summary = JSON.parse(cleanText(r.text));
+    if (!current.title) current.title = current.summary.tieu_de || 'Cuộc họp';
+    renderResult(); saveHistory();
+    if (current.source === 'Nghe trực tiếp') LS.del('tkh_draft');
+    if (cfg.autoSave && cfg.scriptUrl) await saveToDocs();
+  } catch (e) {
+    $('#resBody').innerHTML = `<p style="color:var(--red)">Lỗi khi tóm tắt: ${esc(e.message)}</p><p class="muted">Văn bản đã chép vẫn còn ở trên, bạn có thể bấm "Tóm tắt lại".</p>`;
+  } finally { setResButtons(true); }
+}
+function setResButtons(on) { ['#btnSaveDoc', '#btnCopy', '#btnResum'].forEach(s => $(s).disabled = !on); if (on && !current?.summary) { $('#btnSaveDoc').disabled = true; $('#btnCopy').disabled = true; } }
+const list = a => (a && a.length) ? `<ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="muted">—</p>';
+function renderResult() {
+  const s = current.summary || {};
+  let h = `<h2>${esc(current.title)}</h2><div class="muted">${fmtDate(current.date)}${current.duration ? ' · ' + hms(current.duration) : ''} · ${esc(current.source)}</div>`;
+  h += `<h3>Tóm tắt</h3><p>${esc(s.tom_tat)}</p>`;
+  if (s.thanh_phan?.length) h += `<h3>Thành phần</h3>${list(s.thanh_phan)}`;
+  h += `<h3>Nội dung chính</h3>` + ((s.noi_dung_chinh || []).map(n => `<p><b>${esc(n.chu_de)}</b></p>${list(n.chi_tiet)}`).join('') || '<p class="muted">—</p>');
+  h += `<h3>Kết luận / Quyết định</h3>${list(s.ket_luan)}`;
+  h += `<h3>Việc cần làm</h3>`;
+  h += (s.viec_can_lam?.length) ? `<table><tr><th>#</th><th>Công việc</th><th>Phụ trách</th><th>Hạn</th></tr>${s.viec_can_lam.map((v, i) => `<tr><td>${i + 1}</td><td>${esc(v.cong_viec)}</td><td>${esc(v.phu_trach)}</td><td>${esc(v.han)}</td></tr>`).join('')}</table>` : '<p class="muted">—</p>';
+  if (s.van_de_ton_dong?.length) h += `<h3>Vấn đề còn tồn đọng</h3>${list(s.van_de_ton_dong)}`;
+  h += `<details style="margin-top:12px"><summary>Xem toàn văn (${current.transcript.length.toLocaleString('vi-VN')} ký tự)</summary><div style="white-space:pre-wrap;font-size:14px;margin-top:8px">${esc(current.transcript)}</div></details>`;
+  $('#resBody').innerHTML = h;
+  $('#docLink').innerHTML = current.docUrl ? `✅ Đã lưu: <a href="${esc(current.docUrl)}" target="_blank" rel="noopener">Mở Google Doc</a>` : '';
+}
+function toMarkdown(m) {
+  const s = m.summary || {}, L = a => (a || []).map(x => `- ${x}`).join('\n') || '- —';
+  let t = `# ${m.title}\n${fmtDate(m.date)}${m.duration ? ' · ' + hms(m.duration) : ''} · ${m.source}\n\n## Tóm tắt\n${s.tom_tat || ''}\n`;
+  if (s.thanh_phan?.length) t += `\n## Thành phần\n${L(s.thanh_phan)}\n`;
+  t += `\n## Nội dung chính\n${(s.noi_dung_chinh || []).map(n => `**${n.chu_de}**\n${L(n.chi_tiet)}`).join('\n\n')}\n`;
+  t += `\n## Kết luận / Quyết định\n${L(s.ket_luan)}\n\n## Việc cần làm\n`;
+  t += (s.viec_can_lam || []).map((v, i) => `${i + 1}. ${v.cong_viec} — Phụ trách: ${v.phu_trach} — Hạn: ${v.han}`).join('\n') || '- —';
+  if (s.van_de_ton_dong?.length) t += `\n\n## Vấn đề còn tồn đọng\n${L(s.van_de_ton_dong)}`;
+  return t + `\n\n## Toàn văn\n${m.transcript}\n`;
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch {} ta.remove(); return ok; }
+}
+$('#btnCopy').onclick = async () => { if (current?.summary) toast(await copyText(toMarkdown(current)) ? 'Đã sao chép biên bản' : 'Không sao chép được', false); };
+$('#btnResum').onclick = () => {
+  if (!current) return;
+  const src = current.source === 'Nghe trực tiếp' ? $('#liveText') : $('#fileText');
+  if (src.value.trim().length >= 20 && document.querySelector('#tab-history.active') == null) current.transcript = src.value.trim();
+  summarize();
+};
+$('#btnCloseRes').onclick = () => { $('#result').classList.add('hidden'); if (current) current.summaryShown = false; };
+$('#btnSaveDoc').onclick = () => saveToDocs();
+
+/* ============ GOOGLE DOCS (Apps Script) ============ */
+async function callScript(extra) {
+  if (!cfg.scriptUrl) throw new Error('Chưa nhập link Apps Script (tab Cài đặt).');
+  let res;
+  try { res = await fetch(cfg.scriptUrl, { method: 'POST', body: JSON.stringify(Object.assign({ token: cfg.token }, extra)) }); }
+  catch { throw new Error('Không gọi được Apps Script. Kiểm tra link và phần "Ai có quyền truy cập: Bất kỳ ai" khi triển khai.'); }
+  const txt = await res.text(); let j;
+  try { j = JSON.parse(txt); } catch { throw new Error('Apps Script trả về không đúng định dạng. Kiểm tra lại cách triển khai (Web app, Execute as: Me, Access: Anyone).'); }
+  if (!j.ok) throw new Error('Apps Script báo lỗi: ' + (j.error || 'không rõ'));
+  return j;
+}
+async function saveToDocs(m = current) {
+  if (!m?.summary) return;
+  const btn = $('#btnSaveDoc'); btn.disabled = true; const old = btn.textContent; btn.innerHTML = '<span class="spinner"></span>Đang lưu...';
+  try {
+    const j = await callScript({ action: 'create', title: m.title, dateStr: fmtDate(m.date), duration: m.duration ? hms(m.duration) : '', source: m.source, summary: m.summary, transcript: m.transcript });
+    m.docUrl = j.url; saveHistory(m);
+    if (m === current) $('#docLink').innerHTML = `✅ Đã lưu: <a href="${esc(j.url)}" target="_blank" rel="noopener">Mở Google Doc</a>`;
+    toast('Đã lưu vào Google Docs');
+    if (document.querySelector('#tab-history.active')) renderHistory();
+  } catch (e) { toast(e.message, true, 9000); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
+/* ============ LỊCH SỬ ============ */
+function saveHistory(m = current) {
+  if (!m) return;
+  const h = LS.get('tkh_hist', []).filter(x => x.id !== m.id);
+  const item = { id: m.id, title: m.title, source: m.source, date: m.date, duration: m.duration, transcript: m.transcript, summary: m.summary, docUrl: m.docUrl };
+  h.unshift(item); h.length = Math.min(h.length, 30);
+  if (!LS.set('tkh_hist', h)) { // hết bộ nhớ → bỏ toàn văn của các cuộc cũ đã lưu Docs
+    for (let i = h.length - 1; i > 0; i--) if (h[i].docUrl) h[i].transcript = '';
+    if (!LS.set('tkh_hist', h)) { h.length = Math.min(h.length, 10); LS.set('tkh_hist', h); }
+  }
+}
+function renderHistory() {
+  const h = LS.get('tkh_hist', []), box = $('#histList');
+  if (!h.length) { box.innerHTML = '<p class="muted">Chưa có cuộc họp nào.</p>'; return; }
+  box.innerHTML = h.map(x => `<div class="hist" data-id="${x.id}"><b>${esc(x.title)}</b>
+    <span class="muted">${fmtDate(x.date)}${x.duration ? ' · ' + hms(x.duration) : ''} · ${esc(x.source)}</span>
+    <div class="row"><button data-act="view">Xem</button>${x.docUrl ? `<a href="${esc(x.docUrl)}" target="_blank" rel="noopener" style="align-self:center">Mở Google Doc</a>` : `<button data-act="save">Lưu vào Docs</button>`}<button data-act="del" class="ghost">Xóa</button></div></div>`).join('');
+}
+$('#histList').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const id = +b.closest('.hist').dataset.id, h = LS.get('tkh_hist', []), x = h.find(i => i.id === id); if (!x) return;
+  if (b.dataset.act === 'del') { if (b.dataset.confirm) { LS.set('tkh_hist', h.filter(i => i.id !== id)); renderHistory(); } else { b.dataset.confirm = 1; b.textContent = 'Bấm lần nữa để xóa'; } return; }
+  current = Object.assign({}, x, { summaryShown: true });
+  if (b.dataset.act === 'view') { renderResult(); $('#result').classList.remove('hidden'); setResButtons(true); $('#result').scrollIntoView({ behavior: 'smooth' }); }
+  if (b.dataset.act === 'save') { renderResult(); $('#result').classList.remove('hidden'); saveToDocs(current); }
+};
+
+/* ============ KHỞI ĐỘNG ============ */
+loadCfgUI(); updateNet();
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
