@@ -1,5 +1,5 @@
 // Service worker: cho phép cài app và mở được giao diện khi mạng chập chờn.
-const CACHE = 'thu-ky-hop-v5';
+const CACHE = 'thu-ky-hop-v6';
 const SHELL = ['./', 'index.html', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

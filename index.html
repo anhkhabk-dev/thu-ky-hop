@@ -211,7 +211,7 @@ $('#btnTestGemini').onclick = async () => {
 };
 $('#btnTestDocs').onclick = async () => {
   readCfgUI(); toast('Đang kiểm tra Apps Script...');
-  try { const j = await callScript({ action: 'ping' }); toast('Kết nối Google Docs OK' + (j.folder ? ` (thư mục: ${j.folder})` : '')); }
+  try { const j = await callScript({ action: 'ping' }); if ((j.version || 1) < 2) toast('Kết nối được, nhưng Apps Script là bản CŨ: chưa lưu được ghi âm. Dán mã Code.gs mới và triển khai Phiên bản mới.', true, 10000); else toast('Kết nối Google Docs OK, hỗ trợ lưu ghi âm' + (j.folder ? ` (thư mục: ${j.folder})` : '')); }
   catch (e) { toast(e.message, true, 9000); }
 };
 
@@ -933,6 +933,7 @@ async function callScript(extra) {
   catch { throw new Error('Không gọi được Apps Script. Kiểm tra link và phần "Ai có quyền truy cập: Bất kỳ ai" khi triển khai.'); }
   const txt = await res.text(); let j;
   try { j = JSON.parse(txt); } catch { throw new Error('Apps Script trả về không đúng định dạng. Kiểm tra lại cách triển khai (Web app, Execute as: Me, Access: Anyone).'); }
+  if (!j.ok && /Hành động không hợp lệ/.test(j.error || '')) throw new Error('Apps Script đang chạy bản CŨ (chưa có chức năng lưu ghi âm). Hãy dán mã Code.gs mới, rồi Triển khai → Quản lý → ✏️ → Phiên bản mới → Triển khai.');
   if (!j.ok) throw new Error('Apps Script báo lỗi: ' + (j.error || 'không rõ'));
   return j;
 }
