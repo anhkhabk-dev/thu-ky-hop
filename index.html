@@ -321,32 +321,121 @@ function normalize(a) { // nâng âm lượng nếu ghi quá nhỏ (người nó
   return a;
 }
 
-async function startRec() {
-  if (!cfg.apiKey) { toast('Cần nhập Gemini API key trong tab Cài đặt trước.', true); showTab('settings'); return; }
-  if (!navigator.mediaDevices?.getUserMedia) { toast('Trình duyệt không hỗ trợ micro (cần mở bằng Chrome qua https).', true); return; }
-  try {
-    rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
-  } catch (e) { toast('Không mở được micro: ' + e.message + '. Hãy cho phép quyền micro.', true, 8000); return; }
+/* --- Thu âm: AudioWorklet chạy trên luồng âm thanh riêng nên không bị trình duyệt làm chậm khi chạy nền --- */
+const WORKLET_SRC = `class Cap extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(4096);this.n=0}
+process(inp){const c=inp[0]&&inp[0][0];if(c){for(let i=0;i<c.length;i++){this.b[this.n++]=c[i];if(this.n===4096){this.port.postMessage(this.b,[this.b.buffer]);this.b=new Float32Array(4096);this.n=0}}}return true}}
+registerProcessor('cap',Cap);`;
+const GAP_SEC = 2;   // khoảng mất âm thanh tối thiểu để ghi chú vào biên bản
+
+async function openCapture() {
+  rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
   const AC = window.AudioContext || window.webkitAudioContext;
   try { rec.ctx = new AC({ sampleRate: TARGET_RATE }); } catch { rec.ctx = new AC(); }
   rec.inRate = rec.ctx.sampleRate;
   rec.src = rec.ctx.createMediaStreamSource(rec.stream);
-  rec.proc = rec.ctx.createScriptProcessor(4096, 1, 1);
-  rec.proc.onaudioprocess = e => {
-    if (!rec.active || rec.paused) return;
-    const d = e.inputBuffer.getChannelData(0);
-    rec.bufs.push(new Float32Array(d)); rec.bufLen += d.length; rec.total += d.length;
-    rec.level = Math.min(1, rms(d) * 6);
-    if (rec.bufLen >= cfg.chunkSec * rec.inRate) flushChunk();
-  };
-  rec.src.connect(rec.proc); rec.proc.connect(rec.ctx.destination);
+  rec.sink = rec.ctx.createGain(); rec.sink.gain.value = 0; rec.sink.connect(rec.ctx.destination);
+  try {
+    const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+    await rec.ctx.audioWorklet.addModule(url);
+    rec.proc = new AudioWorkletNode(rec.ctx, 'cap');
+    rec.proc.port.onmessage = e => onFrame(e.data);
+  } catch {                                   // trình duyệt cũ: dùng cách dự phòng
+    rec.proc = rec.ctx.createScriptProcessor(4096, 1, 1);
+    rec.proc.onaudioprocess = e => onFrame(new Float32Array(e.inputBuffer.getChannelData(0)));
+  }
+  rec.src.connect(rec.proc); rec.proc.connect(rec.sink);
+  rec.stream.getAudioTracks()[0].onended = () => { if (rec.active) ensureCapture(); };
+  rec.ctx.onstatechange = () => { if (rec.active && rec.ctx.state === 'suspended') rec.ctx.resume().catch(() => {}); };
+  rec.lastFrameWall = performance.now();
+}
+async function closeCapture() {
+  try { rec.proc.port && (rec.proc.port.onmessage = null); rec.proc.disconnect(); rec.src.disconnect(); } catch {}
+  rec.stream?.getTracks().forEach(t => { t.onended = null; t.stop(); });
+  try { await rec.ctx.close(); } catch {}
+}
+let ensuring = false;
+async function ensureCapture() {        // tự kết nối lại micro / đánh thức bộ xử lý âm thanh nếu bị hệ điều hành ngắt
+  if (!rec.active || ensuring) return; ensuring = true;
+  try {
+    const tr = rec.stream?.getAudioTracks()[0];
+    if (!tr || tr.readyState === 'ended') {
+      await closeCapture(); await openCapture();
+      toast('Micro bị hệ thống ngắt, đã tự kết nối lại.');
+    } else if (rec.ctx.state !== 'running') { await rec.ctx.resume(); }
+  } catch (e) { setLiveStatus('⚠ Micro đang bị ngắt. Mở lại app để tiếp tục nghe.'); }
+  finally { ensuring = false; }
+}
+function onFrame(d) {
+  if (!rec.active || rec.paused) { rec.lastFrameWall = performance.now(); return; }
+  const now = performance.now(), frameSec = d.length / rec.inRate;
+  const gap = (now - rec.lastFrameWall) / 1000 - frameSec;
+  rec.lastFrameWall = now;
+  if (gap > GAP_SEC) {                    // app bị tạm dừng → ghi chú khoảng mất vào đúng vị trí
+    flushChunk();
+    const at = elapsed();
+    rec.offset = (rec.offset || 0) + gap;
+    rec.gaps.push({ at, sec: gap });
+    enqueue({ start: at, note: `(mất âm thanh khoảng ${Math.round(gap)} giây do app bị hệ thống tạm dừng)` });
+  }
+  rec.bufs.push(d); rec.bufLen += d.length; rec.total += d.length;
+  rec.level = Math.min(1, rms(d) * 6);
+  if (rec.bufLen >= cfg.chunkSec * rec.inRate) flushChunk();
+}
+
+/* --- Giữ app "sống" khi chạy nền: phát âm thanh câm + hiện điều khiển trên thanh thông báo --- */
+let keepAliveAudio = null;
+function startKeepAlive() {
+  try {
+    if (!keepAliveAudio) {
+      keepAliveAudio = new Audio(URL.createObjectURL(new Blob([encodeWAV(new Float32Array(TARGET_RATE), TARGET_RATE)], { type: 'audio/wav' })));
+      keepAliveAudio.loop = true;
+    }
+    keepAliveAudio.play().catch(() => {});
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: 'Thư ký cuộc họp', artist: 'Đang nghe cuộc họp...', artwork: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }] });
+      navigator.mediaSession.playbackState = 'playing';
+    }
+  } catch {}
+}
+function stopKeepAlive() {
+  try { keepAliveAudio?.pause(); if ('mediaSession' in navigator) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; } } catch {}
+}
+
+/* --- Lưu các đoạn âm thanh chờ xử lý vào bộ nhớ máy (IndexedDB): app bị tắt vẫn không mất --- */
+const IDB = {
+  db: null,
+  open() { return this.db ? Promise.resolve(this.db) : new Promise((res, rej) => {
+    const r = indexedDB.open('tkh', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('pending', { keyPath: 'id' });
+    r.onsuccess = () => res(this.db = r.result); r.onerror = () => rej(r.error); }); },
+  async run(mode, fn) { try { const db = await this.open(); return await new Promise((res, rej) => {
+    const tx = db.transaction('pending', mode), st = tx.objectStore('pending'), r = fn(st);
+    tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); }); } catch { return null; } },
+  put(item) { return this.run('readwrite', st => st.put(item)); },
+  del(id) { return this.run('readwrite', st => st.delete(id)); },
+  all() { return this.run('readonly', st => st.getAll()); }
+};
+let seq = 0;
+function enqueue(item) {
+  item.id = Date.now() * 1000 + (seq++ % 1000);
+  rec.queue.push(item); IDB.put(item);
+  processQueue();
+}
+
+async function startRec() {
+  if (!cfg.apiKey) { toast('Cần nhập Gemini API key trong tab Cài đặt trước.', true); showTab('settings'); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { toast('Trình duyệt không hỗ trợ micro (cần mở bằng Chrome qua https).', true); return; }
+  try { await openCapture(); }
+  catch (e) { toast('Không mở được micro: ' + e.message + '. Hãy cho phép quyền micro.', true, 8000); return; }
   const continuing = $('#liveText').value.trim().length > 0 && rec.startedAt;
-  if (!continuing) { rec.total = 0; rec.startedAt = new Date(); rec.offset = 0; }
-  else { rec.offset = rec.elapsedBefore || 0; rec.total = 0; }
-  rec.bufs = []; rec.bufLen = 0; rec.chunkStart = 0;
+  if (!continuing) { rec.startedAt = new Date(); rec.offset = 0; }
+  else { rec.offset = rec.elapsedBefore || 0; }
+  rec.total = 0; rec.bufs = []; rec.bufLen = 0; rec.chunkStart = 0; rec.gaps = []; rec.gapsShown = 0;
   rec.active = true; rec.paused = false;
+  startKeepAlive();
   await keepAwake();
   rec.timerId = setInterval(tick, 250);
+  rec.watchId = setInterval(ensureCapture, 5000);
   setRecUI();
 }
 function elapsed() { return (rec.offset || 0) + rec.total / rec.inRate; }
@@ -365,20 +454,23 @@ function flushChunk() {
   if (merged.length < rec.inRate * 1.5) return;          // quá ngắn
   if (rms(merged) < 0.0015) return;                      // im lặng → không gửi, tránh "bịa chữ"
   const pcm = normalize(downsample(merged, rec.inRate, TARGET_RATE));
-  rec.queue.push({ start, b64: abToB64(encodeWAV(pcm, TARGET_RATE)) });
-  processQueue();
+  enqueue({ start, b64: abToB64(encodeWAV(pcm, TARGET_RATE)) });
 }
 async function processQueue() {
   if (rec.busy) return; rec.busy = true;
   while (rec.queue.length) {
-    const item = rec.queue.shift();
-    setLiveStatus(`<span class="spinner"></span>Đang chuyển thành chữ... ${rec.queue.length ? `(còn ${rec.queue.length} đoạn chờ)` : ''}`);
+    const item = rec.queue[0];
+    if (item.note) { appendLive(item.start, item.note); rec.queue.shift(); await IDB.del(item.id); continue; }
+    setLiveStatus(`<span class="spinner"></span>Đang chuyển thành chữ... ${rec.queue.length > 1 ? `(còn ${rec.queue.length - 1} đoạn chờ)` : ''}`);
+    if (!navigator.onLine) { setLiveStatus('⚠ Mất mạng – âm thanh vẫn được giữ lại, sẽ chuyển thành chữ khi có mạng'); await sleep(5000); continue; }
     const prev = $('#liveText').value.slice(-250).replace(/\s+/g, ' ');
-    let text = '';
+    let text = '', ok = false;
     for (let a = 0; a < 3; a++) {
-      try { text = cleanText((await gemini([{ inline_data: { mime_type: 'audio/wav', data: item.b64 } }, { text: chunkPrompt(prev) }])).text); break; }
+      try { text = cleanText((await gemini([{ inline_data: { mime_type: 'audio/wav', data: item.b64 } }, { text: chunkPrompt(prev) }])).text); ok = true; break; }
       catch (e) { if (a === 2) { text = '(đoạn này lỗi, không chuyển được: ' + e.message.slice(0, 80) + ')'; toast(e.message, true, 7000); } else await sleep(6000); }
     }
+    if (!ok && !navigator.onLine) continue;               // mất mạng giữa chừng → giữ lại, thử tiếp
+    rec.queue.shift(); await IDB.del(item.id);
     if (text) appendLive(item.start, text);
   }
   rec.busy = false;
@@ -402,16 +494,15 @@ function togglePause() {
 async function stopRec() {
   if (!rec.active) return;
   rec.active = false; flushChunk();
-  clearInterval(rec.timerId); tick();
+  clearInterval(rec.timerId); clearInterval(rec.watchId); tick();
   rec.elapsedBefore = elapsed();
-  try { rec.proc.disconnect(); rec.src.disconnect(); } catch {}
-  rec.stream?.getTracks().forEach(t => t.stop());
-  try { await rec.ctx.close(); } catch {}
-  releaseAwake(); setRecUI();
+  await closeCapture();
+  stopKeepAlive(); releaseAwake(); setRecUI();
   setLiveStatus('<span class="spinner"></span>Đang hoàn tất các đoạn cuối...');
   while (rec.busy || rec.queue.length) await sleep(300);
   setLiveStatus('Đã dừng');
   saveDraft();
+  if (rec.gaps?.length) toast(`Lưu ý: có ${rec.gaps.length} lần mất âm thanh do app bị tạm dừng (đã ghi chú trong văn bản).`, true, 8000);
   const text = $('#liveText').value.trim();
   if (text.length < 20) { toast('Chưa có nội dung đủ để tóm tắt.', true); return; }
   newMeeting($('#liveTitle').value.trim(), 'Nghe trực tiếp', rec.startedAt, rec.elapsedBefore, text);
@@ -431,9 +522,14 @@ async function keepAwake() {
 }
 function releaseAwake() { try { rec.wakeLock?.release(); } catch {} rec.wakeLock = null; }
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && rec.active) keepAwake();
+  if (document.visibilityState === 'visible' && rec.active) {
+    keepAwake(); ensureCapture(); startKeepAlive();
+    const g = (rec.gaps?.length || 0) - (rec.gapsShown || 0);
+    if (g > 0) { rec.gapsShown = rec.gaps.length; toast(`Trong lúc chạy nền đã mất âm thanh ${g} lần (đã đánh dấu trong văn bản).`, true, 6000); }
+  }
   if (document.visibilityState === 'hidden' && rec.active) saveDraft();
 });
+addEventListener('pageshow', () => { if (rec.active) ensureCapture(); });
 addEventListener('beforeunload', e => { if (rec.active || rec.busy) { e.preventDefault(); e.returnValue = ''; } });
 $('#btnRec').onclick = startRec;
 $('#btnPause').onclick = togglePause;
@@ -729,6 +825,19 @@ $('#histList').onclick = e => {
 
 /* ============ KHỞI ĐỘNG ============ */
 loadCfgUI(); updateNet();
+(async function resumePending() {      // app bị tắt khi đang nghe → chuyển nốt các đoạn âm thanh còn lưu trong máy
+  const items = (await IDB.all()) || [];
+  if (!items.length) return;
+  items.sort((a, b) => a.id - b.id);
+  const d = LS.get('tkh_draft', null);
+  if (d && !$('#liveText').value) {
+    $('#liveTitle').value = d.title || ''; $('#liveText').value = d.text || '';
+    rec.startedAt = d.startedAt ? new Date(d.startedAt) : new Date(); rec.elapsedBefore = d.elapsed || 0; rec.offset = rec.elapsedBefore;
+    $('#timer').textContent = hms(rec.elapsedBefore); $('#draftBanner').classList.add('hidden'); showResumeButton();
+  }
+  toast(`App đã bị tắt khi đang nghe. Đang chuyển nốt ${items.length} đoạn âm thanh còn lưu...`, false, 7000);
+  rec.queue.push(...items); processQueue();
+})();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
