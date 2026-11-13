@@ -90,7 +90,7 @@
     <label>Nội dung chuyển thành văn bản (sửa được)
       <textarea id="liveText" rows="12" placeholder="Văn bản hiện ra theo từng đoạn, chậm khoảng 1 phút so với lời nói..."></textarea></label>
     <div class="row" style="margin-bottom:10px"><button id="btnNew" class="ghost">🗒 Bắt đầu cuộc họp mới (xóa nội dung trên)</button></div>
-    <div class="muted">Mẹo: đặt điện thoại giữa bàn họp, để màn hình luôn sáng (app tự giữ sáng màn hình khi đang nghe). Âm thanh chỉ được gửi đi để chuyển thành chữ rồi bỏ, không lưu file ghi âm.</div>
+    <div class="muted">Mẹo: đặt điện thoại giữa bàn họp, để màn hình luôn sáng (app tự giữ sáng màn hình khi đang nghe). Âm thanh được gửi đi để chuyển thành chữ; file ghi âm chỉ được lưu khi bạn bật tùy chọn trong tab Cài đặt.</div>
   </section>
 
   <!-- TỪ FILE -->
@@ -128,7 +128,7 @@
         </select></label>
       <label id="cfgModelWrap" class="hidden">Tên model (đúng như trong Google AI Studio)<input type="text" id="cfgModel" placeholder="VD: gemini-3.5-flash-lite"></label>
       <label>Độ dài mỗi đoạn khi nghe trực tiếp
-        <select id="cfgChunk"><option value="30">30 giây (hiện chữ nhanh hơn)</option><option value="45">45 giây</option><option value="60">60 giây (đủ ngữ cảnh hơn)</option><option value="90">90 giây</option></select></label>
+        <select id="cfgChunk"><option value="auto">Tự động – ngắt đoạn khi im lặng quá 5 giây (khuyên dùng)</option><option value="30">30 giây (hiện chữ nhanh hơn)</option><option value="45">45 giây</option><option value="60">60 giây (đủ ngữ cảnh hơn)</option><option value="90">90 giây</option></select></label>
       <label>Thuật ngữ, tên riêng hay gặp (giúp chép đúng chính tả)
         <textarea id="cfgGloss" rows="3" placeholder="VD: DHC, KCP, Đăk Pone, penstock, cửa van, khe van, xi lanh thủy lực, nghiệm thu, bảo lãnh"></textarea></label>
       <button id="btnTestGemini">Kiểm tra Gemini</button>
@@ -138,6 +138,8 @@
       <label>Link Web App của Apps Script<input type="url" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec"></label>
       <label>Mã bảo mật (TOKEN, phải trùng với trong Apps Script)<input type="password" id="cfgToken" autocomplete="off"></label>
       <label style="color:var(--txt)"><input type="checkbox" id="cfgAuto"> Tự động lưu vào Google Docs sau khi tóm tắt xong</label>
+      <label style="color:var(--txt)"><input type="checkbox" id="cfgSaveAudio"> Lưu file ghi âm lên Google Drive (cùng thư mục "Thư ký cuộc họp")</label>
+      <div class="help" style="margin:-4px 0 10px 26px">Cần dán lại mã Apps Script bản mới. File khoảng 11 MB mỗi giờ họp, tối đa 30 MB mỗi file (khoảng 2 tiếng 40 phút).</div>
       <button id="btnTestDocs">Kiểm tra kết nối Google Docs</button>
     </div>
     <div class="row"><button id="btnSaveCfg" class="primary">Lưu cài đặt</button></div>
@@ -151,6 +153,7 @@
       <button id="btnSaveDoc" class="primary">💾 Lưu vào Google Docs</button>
       <button id="btnCopy">📋 Sao chép</button>
     </div>
+    <div class="row" style="margin-top:8px"><button id="btnDlAudio" class="hidden">⬇ Tải ghi âm về máy</button></div>
     <div class="row" style="margin-top:8px"><button id="btnResum">🔄 Tóm tắt lại</button><button id="btnCloseRes" class="ghost">Đóng</button></div>
     <div id="docLink" style="margin-top:10px"></div>
   </section>
@@ -180,20 +183,20 @@ function toast(msg, err = false, ms = 4000) {
 
 /* ============ CÀI ĐẶT ============ */
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
-let cfg = Object.assign({ apiKey: '', model: DEFAULT_MODEL, chunkSec: 45, scriptUrl: '', token: '', glossary: '', autoSave: false }, LS.get('tkh_cfg', {}));
+let cfg = Object.assign({ apiKey: '', model: DEFAULT_MODEL, chunkSec: 'auto', scriptUrl: '', token: '', glossary: '', autoSave: false, saveAudio: false }, LS.get('tkh_cfg', {}));
 if (!cfg.modelV2) { if (!cfg.model || cfg.model === 'gemini-flash-latest') cfg.model = DEFAULT_MODEL; cfg.modelV2 = 1; LS.set('tkh_cfg', cfg); }   // chuyển 1 lần từ model mặc định cũ
 function loadCfgUI() {
   $('#cfgKey').value = cfg.apiKey; $('#cfgModel').value = cfg.model;
   const known = [...$('#cfgModelSel').options].some(o => o.value === cfg.model);
   $('#cfgModelSel').value = known ? cfg.model : '__custom'; $('#cfgModelWrap').classList.toggle('hidden', known); $('#cfgChunk').value = String(cfg.chunkSec);
-  $('#cfgGloss').value = cfg.glossary; $('#cfgUrl').value = cfg.scriptUrl; $('#cfgToken').value = cfg.token; $('#cfgAuto').checked = cfg.autoSave;
+  $('#cfgGloss').value = cfg.glossary; $('#cfgUrl').value = cfg.scriptUrl; $('#cfgToken').value = cfg.token; $('#cfgAuto').checked = cfg.autoSave; $('#cfgSaveAudio').checked = !!cfg.saveAudio;
   $('#setupBanner').classList.toggle('hidden', !!cfg.apiKey);
 }
 function readCfgUI() {
   cfg.apiKey = $('#cfgKey').value.trim();
   const sel = $('#cfgModelSel').value; cfg.model = (sel === '__custom' ? $('#cfgModel').value.trim() : sel) || DEFAULT_MODEL;
-  cfg.chunkSec = +$('#cfgChunk').value || 45; cfg.glossary = $('#cfgGloss').value.trim();
-  cfg.scriptUrl = $('#cfgUrl').value.trim(); cfg.token = $('#cfgToken').value.trim(); cfg.autoSave = $('#cfgAuto').checked;
+  { const v = $('#cfgChunk').value; cfg.chunkSec = v === 'auto' ? 'auto' : (+v || 45); } cfg.glossary = $('#cfgGloss').value.trim();
+  cfg.scriptUrl = $('#cfgUrl').value.trim(); cfg.token = $('#cfgToken').value.trim(); cfg.autoSave = $('#cfgAuto').checked; cfg.saveAudio = $('#cfgSaveAudio').checked;
 }
 $('#cfgModelSel').onchange = () => { const c = $('#cfgModelSel').value === '__custom'; $('#cfgModelWrap').classList.toggle('hidden', !c); if (c) $('#cfgModel').focus(); };
 document.querySelectorAll('#tab-settings input, #tab-settings select, #tab-settings textarea').forEach(el => el.addEventListener('change', () => {
@@ -353,7 +356,9 @@ function normalize(a) { // nâng âm lượng nếu ghi quá nhỏ (người nó
 const WORKLET_SRC = `class Cap extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(4096);this.n=0}
 process(inp){const c=inp[0]&&inp[0][0];if(c){for(let i=0;i<c.length;i++){this.b[this.n++]=c[i];if(this.n===4096){this.port.postMessage(this.b,[this.b.buffer]);this.b=new Float32Array(4096);this.n=0}}}return true}}
 registerProcessor('cap',Cap);`;
-const GAP_SEC = 2;   // khoảng mất âm thanh tối thiểu để ghi chú vào biên bản
+const GAP_SEC = 2;
+const AUTO_SILENCE_SEC = 5;   // chế độ Tự động: im lặng bao nhiêu giây thì ngắt đoạn
+const AUTO_MAX_SEC = 120;     // đoạn dài nhất (người nói liên tục không nghỉ)   // khoảng mất âm thanh tối thiểu để ghi chú vào biên bản
 
 async function openCapture() {
   rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
@@ -387,7 +392,7 @@ async function ensureCapture() {        // tự kết nối lại micro / đánh
   try {
     const tr = rec.stream?.getAudioTracks()[0];
     if (!tr || tr.readyState === 'ended') {
-      await closeCapture(); await openCapture();
+      await stopAudioRec(); await closeCapture(); await openCapture(); startAudioRec();
       toast('Micro bị hệ thống ngắt, đã tự kết nối lại.');
     } else if (rec.ctx.state !== 'running') { await rec.ctx.resume(); }
   } catch (e) { setLiveStatus('⚠ Micro đang bị ngắt. Mở lại app để tiếp tục nghe.'); }
@@ -406,9 +411,17 @@ function onFrame(d) {
     enqueue({ start: at, note: `(mất âm thanh khoảng ${Math.round(gap)} giây do app bị hệ thống tạm dừng)` });
   }
   rec.bufs.push(d); rec.bufLen += d.length; rec.total += d.length;
-  rec.level = Math.min(1, rms(d) * 6);
-  if (rec.bufLen >= cfg.chunkSec * rec.inRate) flushChunk();
+  const r = rms(d);
+  rec.level = Math.min(1, r * 6);
+  if (cfg.chunkSec !== 'auto') { if (rec.bufLen >= cfg.chunkSec * rec.inRate) flushChunk(); return; }
+  // Tự động: theo dõi tiếng ồn nền, có tiếng nói rồi mà im lặng quá AUTO_SILENCE_SEC giây thì ngắt đoạn
+  rec.noise = Math.max(0.0005, Math.min((rec.noise || 0.002) * 1.01, r));   // giảm nhanh khi yên, tăng chậm khi ồn
+  if (r > Math.max(0.008, rec.noise * 4)) { rec.silence = 0; rec.hasSpeech = true; } else rec.silence = (rec.silence || 0) + frameSec;
+  const bufSec = rec.bufLen / rec.inRate;
+  if ((rec.hasSpeech && rec.silence >= AUTO_SILENCE_SEC) || bufSec >= AUTO_MAX_SEC) flushChunk();
+  else if (!rec.hasSpeech && bufSec >= 30) discardBuffer();   // im lặng kéo dài → bỏ, không gửi
 }
+function discardBuffer() { rec.bufs = []; rec.bufLen = 0; rec.chunkStart = rec.total / rec.inRate; }
 
 /* --- Giữ app "sống" khi chạy nền: phát âm thanh câm + hiện điều khiển trên thanh thông báo --- */
 let keepAliveAudio = null;
@@ -433,16 +446,92 @@ function stopKeepAlive() {
 const IDB = {
   db: null,
   open() { return this.db ? Promise.resolve(this.db) : new Promise((res, rej) => {
-    const r = indexedDB.open('tkh', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('pending', { keyPath: 'id' });
-    r.onsuccess = () => res(this.db = r.result); r.onerror = () => rej(r.error); }); },
-  async run(mode, fn) { try { const db = await this.open(); return await new Promise((res, rej) => {
-    const tx = db.transaction('pending', mode), st = tx.objectStore('pending'), r = fn(st);
+    const t = setTimeout(() => rej(new Error('IDB timeout')), 4000);
+    const r = indexedDB.open('tkh', 2);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains('pending')) db.createObjectStore('pending', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('audio')) db.createObjectStore('audio', { keyPath: 'k' });
+    };
+    r.onsuccess = () => { clearTimeout(t); this.db = r.result; this.db.onversionchange = () => { this.db.close(); this.db = null; }; res(this.db); };
+    r.onerror = () => { clearTimeout(t); rej(r.error); };
+  }); },
+  async run(store, mode, fn) { try { const db = await this.open(); return await new Promise((res, rej) => {
+    const tx = db.transaction(store, mode), st = tx.objectStore(store), r = fn(st);
     tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); }); } catch { return null; } },
-  put(item) { return this.run('readwrite', st => st.put(item)); },
-  del(id) { return this.run('readwrite', st => st.delete(id)); },
-  all() { return this.run('readonly', st => st.getAll()); }
+  put(item) { return this.run('pending', 'readwrite', st => st.put(item)); },
+  del(id) { return this.run('pending', 'readwrite', st => st.delete(id)); },
+  all() { return this.run('pending', 'readonly', st => st.getAll()); },
+  putAudio(item) { return this.run('audio', 'readwrite', st => st.put(item)); },
+  getAudio(key) { const lo = key + '_', hi = key + '_￿'; return this.run('audio', 'readonly', st => st.getAll(IDBKeyRange.bound(lo, hi))); },
+  delAudio(key) { const lo = key + '_', hi = key + '_￿'; return this.run('audio', 'readwrite', st => st.delete(IDBKeyRange.bound(lo, hi))); }
 };
+
+/* --- Ghi âm toàn bộ cuộc họp (khi bật tùy chọn), lưu dần từng 10 giây vào máy --- */
+const AUDIO_MAX_MB = 30;
+const pad0 = (n, w) => String(n).padStart(w, '0');
+function pickAudioMime() {
+  if (!window.MediaRecorder) return null;
+  for (const t of ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']) if (MediaRecorder.isTypeSupported(t)) return t;
+  return '';
+}
+function startAudioRec() {
+  if (!cfg.saveAudio) return;
+  const mime = pickAudioMime(); if (mime === null) { toast('Trình duyệt không hỗ trợ ghi âm, chỉ chuyển thành chữ.', true); return; }
+  try { rec.mr = new MediaRecorder(rec.stream, Object.assign({ audioBitsPerSecond: 24000 }, mime ? { mimeType: mime } : {})); } catch { return; }
+  const seg = rec.audioSeg = (rec.audioSeg ?? -1) + 1, key = rec.sessionId, type = rec.mr.mimeType || mime || 'audio/webm';
+  let idx = 0; rec.audioWrites = [];
+  rec.mr.ondataavailable = e => { if (e.data && e.data.size) rec.audioWrites.push(IDB.putAudio({ k: `${key}_${pad0(seg, 3)}_${pad0(idx++, 6)}`, seg, mime: type, blob: e.data })); };
+  rec.mr.start(10000);
+  if (rec.paused) try { rec.mr.pause(); } catch {}
+}
+function stopAudioRec() {
+  return new Promise(res => {
+    const mr = rec.mr; rec.mr = null;
+    if (!mr || mr.state === 'inactive') return Promise.all(rec.audioWrites || []).then(res);
+    mr.onstop = () => setTimeout(() => Promise.all(rec.audioWrites || []).then(res), 100);
+    try { mr.stop(); } catch { res(); }
+  });
+}
+async function audioBlobs(key) {        // gom các mẩu đã lưu thành file hoàn chỉnh (mỗi lần micro bị nối lại là 1 phần)
+  const parts = (await IDB.getAudio(key)) || [];
+  const segs = {};
+  parts.sort((a, b) => a.k < b.k ? -1 : 1).forEach(p => (segs[p.seg] = segs[p.seg] || []).push(p));
+  return Object.values(segs).map(ps => {
+    const mime = ps[0].mime.split(';')[0];
+    return { blob: new Blob(ps.map(p => p.blob), { type: mime }), mime, ext: ps[0].name ? ps[0].name.split('.').pop() : (mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'ogg') };
+  }).filter(x => x.blob.size > 2000);
+}
+function blobToB64(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = () => rej(r.error); r.readAsDataURL(blob); }); }
+function fileStamp(d) { d = new Date(d); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}h${pad(d.getMinutes())}`; }
+function safeName(t) { return String(t || 'Cuoc hop').replace(/[\\/:*?"<>|]/g, '-').slice(0, 80); }
+async function uploadAudio(m, onStatus) {
+  if (!m.audioKey) return m.audioUrls || [];
+  const files = await audioBlobs(m.audioKey);
+  if (!files.length) return m.audioUrls || [];
+  const urls = []; let allOk = true;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i], mb = f.blob.size / 1048576;
+    if (mb > AUDIO_MAX_MB) { allOk = false; toast(`File ghi âm ${mb.toFixed(0)} MB quá lớn để đẩy lên Drive (tối đa ${AUDIO_MAX_MB} MB). Bấm "Tải ghi âm" để lưu về máy.`, true, 10000); continue; }
+    onStatus?.(`Đang đẩy ghi âm lên Drive${files.length > 1 ? ` (${i + 1}/${files.length})` : ''} – ${mb.toFixed(1)} MB...`);
+    const name = `${fileStamp(m.date)} - ${safeName(m.title)}${files.length > 1 ? ` (phần ${i + 1})` : ''}.${f.ext}`;
+    const j = await callScript({ action: 'upload', name, mimeType: f.mime, b64: await blobToB64(f.blob) });
+    urls.push(j.url);
+  }
+  m.audioUrls = urls;
+  if (allOk) { await IDB.delAudio(m.audioKey); m.audioKey = null; }
+  return urls;
+}
+async function downloadAudio(m) {
+  const files = await audioBlobs(m.audioKey);
+  if (!files.length) return toast('Không còn file ghi âm trong máy (có thể đã đẩy lên Drive).', true);
+  files.forEach((f, i) => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(f.blob);
+    a.download = `${fileStamp(m.date)} - ${safeName(m.title)}${files.length > 1 ? ` (phần ${i + 1})` : ''}.${f.ext}`;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 5000);
+  });
+}
+
 let seq = 0;
 function enqueue(item) {
   item.id = Date.now() * 1000 + (seq++ % 1000);
@@ -456,10 +545,11 @@ async function startRec() {
   try { await openCapture(); }
   catch (e) { toast('Không mở được micro: ' + e.message + '. Hãy cho phép quyền micro.', true, 8000); return; }
   const continuing = $('#liveText').value.trim().length > 0 && rec.startedAt;
-  if (!continuing) { rec.startedAt = new Date(); rec.offset = 0; }
-  else { rec.offset = rec.elapsedBefore || 0; }
-  rec.total = 0; rec.bufs = []; rec.bufLen = 0; rec.chunkStart = 0; rec.gaps = []; rec.gapsShown = 0;
+  if (!continuing) { rec.startedAt = new Date(); rec.offset = 0; rec.sessionId = String(Date.now()); rec.audioSeg = -1; }
+  else { rec.offset = rec.elapsedBefore || 0; rec.sessionId = rec.sessionId || String(Date.now()); }
+  rec.total = 0; rec.bufs = []; rec.bufLen = 0; rec.chunkStart = 0; rec.gaps = []; rec.gapsShown = 0; rec.noise = 0; rec.silence = 0; rec.hasSpeech = false;
   rec.active = true; rec.paused = false;
+  startAudioRec();
   startKeepAlive();
   await keepAwake();
   rec.timerId = setInterval(tick, 250);
@@ -476,7 +566,7 @@ function flushChunk() {
   if (!rec.bufLen) return;
   const merged = new Float32Array(rec.bufLen); let o = 0;
   for (const b of rec.bufs) { merged.set(b, o); o += b.length; }
-  rec.bufs = []; rec.bufLen = 0;
+  rec.bufs = []; rec.bufLen = 0; rec.hasSpeech = false; rec.silence = 0;
   const start = (rec.offset || 0) + rec.chunkStart;
   rec.chunkStart = rec.total / rec.inRate;
   if (merged.length < rec.inRate * 1.5) return;          // quá ngắn
@@ -529,12 +619,13 @@ function appendLive(start, text) {
   saveDraft();
 }
 function saveDraft() {
-  LS.set('tkh_draft', { title: $('#liveTitle').value, text: $('#liveText').value, startedAt: rec.startedAt, elapsed: elapsed() });
+  LS.set('tkh_draft', { title: $('#liveTitle').value, text: $('#liveText').value, startedAt: rec.startedAt, elapsed: elapsed(), sessionId: rec.sessionId, audioSeg: rec.audioSeg });
 }
 function togglePause() {
   if (!rec.active) return;
   rec.paused = !rec.paused;
   if (rec.paused) flushChunk();
+  try { if (rec.mr) rec.paused ? rec.mr.pause() : rec.mr.resume(); } catch {}
   setRecUI();
 }
 async function stopRec() {
@@ -542,6 +633,7 @@ async function stopRec() {
   rec.active = false; flushChunk();
   clearInterval(rec.timerId); clearInterval(rec.watchId); tick();
   rec.elapsedBefore = elapsed();
+  await stopAudioRec();
   await closeCapture();
   stopKeepAlive(); releaseAwake(); setRecUI();
   rec.skip = false; rec.lastError = '';
@@ -555,7 +647,7 @@ async function stopRec() {
   const text = $('#liveText').value.trim();
   const real = text.split('\n').filter(l => !/^\[[\d:]+\] \((đoạn này lỗi|bỏ qua|mất âm thanh)/.test(l)).join(' ');
   if (real.length < 20) { toast(rec.lastError ? 'Chưa chuyển được đoạn nào thành chữ: ' + rec.lastError : 'Chưa có nội dung đủ để tóm tắt.', true, 9000); return; }
-  newMeeting($('#liveTitle').value.trim(), 'Nghe trực tiếp', rec.startedAt, rec.elapsedBefore, text);
+  newMeeting($('#liveTitle').value.trim(), 'Nghe trực tiếp', rec.startedAt, rec.elapsedBefore, text, rec.sessionId);
   await summarize();
 }
 function setLiveStatus(html) { $('#liveStatus').innerHTML = html; }
@@ -594,7 +686,7 @@ $('#liveText').addEventListener('input', () => { if ($('#liveText').value) saveD
 $('#btnRestore').onclick = () => {
   const d = LS.get('tkh_draft', null); if (!d) return;
   $('#liveTitle').value = d.title || ''; $('#liveText').value = d.text || '';
-  rec.startedAt = d.startedAt ? new Date(d.startedAt) : new Date(); rec.elapsedBefore = d.elapsed || 0; rec.offset = rec.elapsedBefore;
+  rec.startedAt = d.startedAt ? new Date(d.startedAt) : new Date(); rec.elapsedBefore = d.elapsed || 0; rec.offset = rec.elapsedBefore; rec.sessionId = d.sessionId; rec.audioSeg = d.audioSeg ?? -1;
   $('#timer').textContent = hms(rec.elapsedBefore);
   $('#draftBanner').classList.add('hidden');
   toast('Đã khôi phục. Bấm nút đỏ để nghe tiếp, hoặc bấm "Tóm tắt" bên dưới.');
@@ -606,7 +698,7 @@ $('#btnNew').onclick = e => {
   if (!b.dataset.confirm && $('#liveText').value.trim()) { b.dataset.confirm = 1; b.textContent = 'Bấm lần nữa để xóa nội dung hiện tại'; setTimeout(() => { delete b.dataset.confirm; b.textContent = '🗒 Bắt đầu cuộc họp mới (xóa nội dung trên)'; }, 4000); return; }
   delete b.dataset.confirm; b.textContent = '🗒 Bắt đầu cuộc họp mới (xóa nội dung trên)';
   $('#liveText').value = ''; $('#liveTitle').value = ''; $('#timer').textContent = '00:00:00';
-  rec.startedAt = null; rec.elapsedBefore = 0; rec.offset = 0; LS.del('tkh_draft');
+  rec.startedAt = null; rec.elapsedBefore = 0; rec.offset = 0; rec.sessionId = null; LS.del('tkh_draft');
   $('#btnStop').disabled = true; setLiveStatus('Bấm nút đỏ để bắt đầu nghe');
 };
 $('#btnDiscard').onclick =() => { LS.del('tkh_draft'); $('#draftBanner').classList.add('hidden'); };
@@ -616,7 +708,7 @@ function showResumeButton() {
     if (rec.active) return stopRec();
     const text = $('#liveText').value.trim();
     if (text.length < 20) return toast('Chưa có nội dung đủ để tóm tắt.', true);
-    newMeeting($('#liveTitle').value.trim(), 'Nghe trực tiếp', rec.startedAt || new Date(), rec.elapsedBefore || 0, text);
+    newMeeting($('#liveTitle').value.trim(), 'Nghe trực tiếp', rec.startedAt || new Date(), rec.elapsedBefore || 0, text, rec.sessionId);
     await summarize();
   };
 }
@@ -747,7 +839,9 @@ $('#btnFileGo').onclick = async () => {
     const text = await transcribeFile(pickedFile, pickedDur);
     setFileStatus('Đã chuyển xong thành chữ.');
     if (text.trim().length < 20) { toast('Không nhận được lời nói trong file.', true); return; }
-    newMeeting($('#fileTitle').value.trim(), 'File: ' + pickedFile.name, new Date(pickedFile.lastModified || Date.now()), pickedDur, text);
+    let audioKey = null;
+    if (cfg.saveAudio) { audioKey = 'f' + Date.now(); await IDB.putAudio({ k: `${audioKey}_000_000000`, seg: 0, mime: guessMime(pickedFile), name: pickedFile.name, blob: pickedFile }); }
+    newMeeting($('#fileTitle').value.trim(), 'File: ' + pickedFile.name, new Date(pickedFile.lastModified || Date.now()), pickedDur, text, audioKey);
     await summarize();
   } catch (e) { setFileStatus('Lỗi: ' + esc(e.message)); toast(e.message, true, 9000); }
   finally { $('#btnFileGo').disabled = false; setTimeout(() => setProg(null), 1500); }
@@ -762,8 +856,8 @@ $('#btnFileSummarize').onclick = async () => {
 
 /* ============ TÓM TẮT & KẾT QUẢ ============ */
 let current = null;
-function newMeeting(title, source, date, duration, transcript) {
-  current = { id: Date.now(), title, source, date: (date ? new Date(date) : new Date()).toISOString(), duration: duration || 0, transcript, summary: null, docUrl: '', summaryShown: false };
+function newMeeting(title, source, date, duration, transcript, audioKey = null) {
+  current = { id: Date.now(), audioKey, audioUrls: [], title, source, date: (date ? new Date(date) : new Date()).toISOString(), duration: duration || 0, transcript, summary: null, docUrl: '', summaryShown: false };
 }
 async function summarize() {
   if (!current) return;
@@ -796,8 +890,17 @@ function renderResult() {
   if (s.van_de_ton_dong?.length) h += `<h3>Vấn đề còn tồn đọng</h3>${list(s.van_de_ton_dong)}`;
   h += `<details style="margin-top:12px"><summary>Xem toàn văn (${current.transcript.length.toLocaleString('vi-VN')} ký tự)</summary><div style="white-space:pre-wrap;font-size:14px;margin-top:8px">${esc(current.transcript)}</div></details>`;
   $('#resBody').innerHTML = h;
-  $('#docLink').innerHTML = current.docUrl ? `✅ Đã lưu: <a href="${esc(current.docUrl)}" target="_blank" rel="noopener">Mở Google Doc</a>` : '';
+  showDocLink(current);
+  $('#btnDlAudio').classList.add('hidden');
+  const m = current;
+  if (m.audioKey) audioBlobs(m.audioKey).then(f => { if (f.length && m === current) $('#btnDlAudio').classList.remove('hidden'); });
 }
+function showDocLink(m) {
+  if (m !== current) return;
+  const a = (m.audioUrls || []).map((u, i) => ` · <a href="${esc(u)}" target="_blank" rel="noopener">🎧 Ghi âm${m.audioUrls.length > 1 ? ' ' + (i + 1) : ''}</a>`).join('');
+  $('#docLink').innerHTML = m.docUrl ? `✅ Đã lưu: <a href="${esc(m.docUrl)}" target="_blank" rel="noopener">Mở Google Doc</a>${a}` : (a ? '✅ Đã lưu' + a : '');
+}
+$('#btnDlAudio').onclick = () => current && downloadAudio(current);
 function toMarkdown(m) {
   const s = m.summary || {}, L = a => (a || []).map(x => `- ${x}`).join('\n') || '- —';
   let t = `# ${m.title}\n${fmtDate(m.date)}${m.duration ? ' · ' + hms(m.duration) : ''} · ${m.source}\n\n## Tóm tắt\n${s.tom_tat || ''}\n`;
@@ -837,10 +940,16 @@ async function saveToDocs(m = current) {
   if (!m?.summary) return;
   const btn = $('#btnSaveDoc'); btn.disabled = true; const old = btn.textContent; btn.innerHTML = '<span class="spinner"></span>Đang lưu...';
   try {
-    const j = await callScript({ action: 'create', title: m.title, dateStr: fmtDate(m.date), duration: m.duration ? hms(m.duration) : '', source: m.source, summary: m.summary, transcript: m.transcript });
+    if (cfg.saveAudio && m.audioKey) {
+      try { await uploadAudio(m, t => { btn.innerHTML = '<span class="spinner"></span>' + esc(t); }); saveHistory(m); }
+      catch (e) { toast('Không đẩy được file ghi âm: ' + e.message + ' (file vẫn còn trong máy, bấm Lưu lại sau).', true, 10000); }
+      btn.innerHTML = '<span class="spinner"></span>Đang lưu biên bản...';
+    }
+    const j = await callScript({ action: 'create', title: m.title, dateStr: fmtDate(m.date), duration: m.duration ? hms(m.duration) : '', source: m.source, summary: m.summary, transcript: m.transcript, audioUrls: m.audioUrls || [] });
     m.docUrl = j.url; saveHistory(m);
-    if (m === current) $('#docLink').innerHTML = `✅ Đã lưu: <a href="${esc(j.url)}" target="_blank" rel="noopener">Mở Google Doc</a>`;
-    toast('Đã lưu vào Google Docs');
+    showDocLink(m);
+    if (m === current && !m.audioKey) $('#btnDlAudio').classList.add('hidden');
+    toast(m.audioUrls?.length ? 'Đã lưu biên bản và file ghi âm lên Google Drive' : 'Đã lưu vào Google Docs');
     if (document.querySelector('#tab-history.active')) renderHistory();
   } catch (e) { toast(e.message, true, 9000); }
   finally { btn.disabled = false; btn.textContent = old; }
@@ -850,7 +959,7 @@ async function saveToDocs(m = current) {
 function saveHistory(m = current) {
   if (!m) return;
   const h = LS.get('tkh_hist', []).filter(x => x.id !== m.id);
-  const item = { id: m.id, title: m.title, source: m.source, date: m.date, duration: m.duration, transcript: m.transcript, summary: m.summary, docUrl: m.docUrl };
+  const item = { id: m.id, title: m.title, source: m.source, date: m.date, duration: m.duration, transcript: m.transcript, summary: m.summary, docUrl: m.docUrl, audioKey: m.audioKey, audioUrls: m.audioUrls || [] };
   h.unshift(item); h.length = Math.min(h.length, 30);
   if (!LS.set('tkh_hist', h)) { // hết bộ nhớ → bỏ toàn văn của các cuộc cũ đã lưu Docs
     for (let i = h.length - 1; i > 0; i--) if (h[i].docUrl) h[i].transcript = '';
@@ -867,7 +976,7 @@ function renderHistory() {
 $('#histList').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
   const id = +b.closest('.hist').dataset.id, h = LS.get('tkh_hist', []), x = h.find(i => i.id === id); if (!x) return;
-  if (b.dataset.act === 'del') { if (b.dataset.confirm) { LS.set('tkh_hist', h.filter(i => i.id !== id)); renderHistory(); } else { b.dataset.confirm = 1; b.textContent = 'Bấm lần nữa để xóa'; } return; }
+  if (b.dataset.act === 'del') { if (b.dataset.confirm) { if (x.audioKey) IDB.delAudio(x.audioKey); LS.set('tkh_hist', h.filter(i => i.id !== id)); renderHistory(); } else { b.dataset.confirm = 1; b.textContent = 'Bấm lần nữa để xóa'; } return; }
   current = Object.assign({}, x, { summaryShown: true });
   if (b.dataset.act === 'view') { renderResult(); $('#result').classList.remove('hidden'); setResButtons(true); $('#result').scrollIntoView({ behavior: 'smooth' }); }
   if (b.dataset.act === 'save') { renderResult(); $('#result').classList.remove('hidden'); saveToDocs(current); }
@@ -882,7 +991,7 @@ loadCfgUI(); updateNet();
   const d = LS.get('tkh_draft', null);
   if (d && !$('#liveText').value) {
     $('#liveTitle').value = d.title || ''; $('#liveText').value = d.text || '';
-    rec.startedAt = d.startedAt ? new Date(d.startedAt) : new Date(); rec.elapsedBefore = d.elapsed || 0; rec.offset = rec.elapsedBefore;
+    rec.startedAt = d.startedAt ? new Date(d.startedAt) : new Date(); rec.elapsedBefore = d.elapsed || 0; rec.offset = rec.elapsedBefore; rec.sessionId = d.sessionId; rec.audioSeg = d.audioSeg ?? -1;
     $('#timer').textContent = hms(rec.elapsedBefore); $('#draftBanner').classList.add('hidden'); showResumeButton();
   }
   toast(`App đã bị tắt khi đang nghe. Đang chuyển nốt ${items.length} đoạn âm thanh còn lưu...`, false, 7000);
